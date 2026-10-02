@@ -1006,7 +1006,7 @@ document.addEventListener('click', e => {
 // Sign-in with Supabase Auth. The database decides access (see supabase-setup.sql):
 // admin edits everything, a player edits only their own profile, anyone else sees nothing.
 // The anon key is meant to be public.
-const CLOUD = { url: '', key: '' };
+const CLOUD = { url: 'https://vvnwwsrvoxvofywvakzh.supabase.co', key: 'sb_publishable_1FLnhaoJHhgyqi40rz9etw_xpRqQLIo' };
 const CLOUD_ON = !!(CLOUD.url && CLOUD.key) && location.protocol.startsWith('http') && !!window.supabase;
 const sb = CLOUD_ON ? window.supabase.createClient(CLOUD.url, CLOUD.key) : null;
 let session = null, role = 'none', canEdit = false, myProfileId = null;
