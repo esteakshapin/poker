@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Home Game Tracker</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
   :root {
     color-scheme: light dark;
@@ -97,6 +98,23 @@
 </style>
 </head>
 <body>
+<div id="login" class="hidden" style="max-width:380px;margin:12vh auto 0;padding:0 16px">
+  <div class="card">
+    <h1 style="margin-bottom:6px">Home Game Tracker</h1>
+    <p class="note" id="login-note" style="margin-top:0">Sign in to see the standings.</p>
+    <form id="login-form" style="display:grid;gap:10px">
+      <input id="login-email" type="email" placeholder="Email" autocomplete="email" required>
+      <input id="login-pass" type="password" placeholder="Password" autocomplete="current-password" minlength="6" required>
+      <button class="btn" type="submit">Sign in</button>
+    </form>
+    <div class="row" style="margin-top:10px;justify-content:space-between">
+      <button class="ghost" id="login-signup">Create account</button>
+      <button class="link" id="login-forgot" style="color:var(--muted)">Forgot password?</button>
+    </div>
+    <div class="note" id="login-msg"></div>
+  </div>
+</div>
+<div id="app">
 <header>
   <h1>Home Game Tracker</h1>
   <div class="tbar">
@@ -250,6 +268,7 @@
     </div>
   </section>
 </main>
+</div>
 
 <script>
 const KEY = 'poker-tournament-v1';
@@ -291,7 +310,7 @@ function normalizeDb(d) {
 function current() { return db.tournaments.find(t => t.id === db.currentId); }
 function makeProfile(fullName, id = uid()) {
   const parts = fullName.trim().split(/\s+/);
-  return { id, first: parts[0] || 'Player', last: parts.slice(1).join(' '), display: '', avatar: null, notes: '' };
+  return { id, first: parts[0] || 'Player', last: parts.slice(1).join(' '), display: '', avatar: null, notes: '', email: null };
 }
 const autoDisplay = p => p.last ? `${p.first} ${p.last[0].toUpperCase()}.` : p.first;
 const fullName = p => [p.first, p.last].filter(Boolean).join(' ');
@@ -426,14 +445,21 @@ function render() {
   $('t-select').innerHTML = db.tournaments.map(t => `<option value="${t.id}"${t.id === state.id ? ' selected' : ''}>${esc(t.settings.name)}${t.status === 'ended' ? ' (ended)' : ''}</option>`).join('');
   $('subtitle').textContent = `${ended ? 'Ended ' + fmtDate(state.endedAt) : 'In progress'} · $${S.buyIn} = ${num(S.chipsPerBuyIn)} chips · ${done} session${done === 1 ? '' : 's'} played · ${S.minPct}% attendance to qualify`;
   renderStandings(done); renderSessions(); renderPlayers(); renderPerformance(); renderSettings(); renderProfiles();
+}
+function applyLocks() {
+  const ended = state.status === 'ended';
   document.querySelectorAll('main input, main select, main textarea, main button').forEach(el => { el.disabled = false; });
   // An ended tournament is read-only until reopened.
   document.querySelectorAll('#tab-sessions input, #tab-sessions button, #tab-players input, #tab-players select, #tab-players button, #tab-settings .rules input')
     .forEach(el => { el.disabled = ended; });
-  // Online without the passcode: view only.
+  // Online, only the admin edits; a player can edit just their own profile.
   const viewOnly = CLOUD_ON && !canEdit;
   if (viewOnly) document.querySelectorAll('main input, main select, main textarea, main button, #t-new')
-    .forEach(el => { if (!el.closest('#chart-mode, #roster') && !el.dataset.profile) el.disabled = true; });
+    .forEach(el => {
+      if (el.closest('#chart-mode, #roster') || el.dataset.profile) return;
+      if (el.closest('#profile-card') && profileId === myProfileId && el.id !== 'pf-delete') return;
+      el.disabled = true;
+    });
   else $('t-new').disabled = false;
   $('t-end').classList.toggle('hidden', ended || viewOnly);
   $('ended-banner').innerHTML = ended ? `<div class="ended-banner"><span><b>This tournament ended ${fmtDate(state.endedAt)}.</b> The payout below is final and the data is locked.</span>${viewOnly ? '' : '<button class="ghost" id="t-reopen">Reopen</button>'}</div>` : '';
@@ -662,7 +688,7 @@ function renderProfiles() {
   $('roster').innerHTML = ids.length ? ids.map(id => { const p = prof(id);
     return `<button data-profile="${id}" class="${id === profileId ? 'sel' : ''}">${avatar(p, 48)}<b>${esc(p.name)}</b><span class="muted" style="font-size:12px">${esc(p.full)}</span></button>`; }).join('')
     : '<div class="empty">No players yet. Add them to a tournament on the Buy-ins tab.</div>';
-  if (!profileId) { $('profile-card').innerHTML = '<div class="empty">No players yet.</div>'; return; }
+  if (!profileId) { $('profile-card').innerHTML = '<div class="empty">No players yet.</div>'; return applyLocks(); }
   const p = prof(profileId), signed = v => (v > 0 ? '+' : '') + num(v);
   const sgnMoney = v => (v > 0 ? '+' : v < 0 ? '−' : '') + money(Math.abs(v));
 
@@ -699,6 +725,7 @@ function renderProfiles() {
       <label>Last name<input id="pf-last" value="${esc(p.last)}"></label>
       <label>Display name<input id="pf-display" value="${esc(p.display)}" placeholder="${esc(ph)} (automatic)"></label>
     </div>
+    ${CLOUD_ON && canEdit ? `<div class="form-grid" style="margin-top:12px"><label>Login email (lets them sign in and edit this profile)<input id="pf-email" type="email" value="${esc(p.email || '')}" placeholder="name@example.com"></label></div>` : ''}
     <label class="muted" style="display:block;margin-top:12px;font-size:13px">Notes<textarea id="pf-notes" rows="2" placeholder="Anything worth remembering">${esc(p.notes || '')}</textarea></label>
     <div class="stats" style="margin-top:16px">${tiles.map(([k, v]) => `<div class="stat"><div class="k">${k}</div><div class="v">${v}</div></div>`).join('')}</div>
     <div class="table-wrap"><table>
@@ -711,7 +738,8 @@ function renderProfiles() {
           <td class="num">${money(r.won)}${live ? ' <span class="muted">(if ended now)</span>' : ''}</td>
           <td class="num ${res > 0 ? 'pos' : res < 0 ? 'neg' : ''}">${sgnMoney(res)}</td></tr>`; }).join('')
         : '<tr><td class="empty" colspan="9">Not in any tournament yet.</td></tr>'}</tbody></table></div>
-    <div class="row" style="margin-top:14px"><button class="link" id="pf-delete">Delete player</button></div>`;
+    ${!CLOUD_ON || canEdit ? '<div class="row" style="margin-top:14px"><button class="link" id="pf-delete">Delete player</button></div>' : ''}`;
+  applyLocks();
 }
 $('profile-card').addEventListener('change', async e => {
   const p = db.profiles[profileId]; if (!p) return;
@@ -720,6 +748,12 @@ $('profile-card').addEventListener('change', async e => {
   else if (id === 'pf-last') p.last = e.target.value.trim();
   else if (id === 'pf-display') p.display = e.target.value.trim();
   else if (id === 'pf-notes') p.notes = e.target.value;
+  else if (id === 'pf-email') {
+    const em = e.target.value.trim().toLowerCase();
+    const taken = em && Object.values(db.profiles).find(o => o.id !== p.id && (o.email || '') === em);
+    if (taken) { alert(`${prof(taken.id).name} already uses that email.`); e.target.value = p.email || ''; return; }
+    p.email = em || null;
+  }
   else if (id === 'pf-avatar' && e.target.files[0]) {
     try { p.avatar = await squareImage(e.target.files[0], 160); } catch (err) { return alert("Couldn't read that image."); }
   } else return;
@@ -969,96 +1003,144 @@ document.addEventListener('click', e => {
   else if (id === 'file-unlink') { fileHandle = null; storeHandle(null); setFile('none', ''); }
 });
 // ---------- online sync (Supabase) ----------
-// Anyone with the link can view. Saving needs the passcode, which the database checks (see supabase-setup.sql).
-// The anon key is meant to be public; the passcode is what protects edits.
+// Sign-in with Supabase Auth. The database decides access (see supabase-setup.sql):
+// admin edits everything, a player edits only their own profile, anyone else sees nothing.
+// The anon key is meant to be public.
 const CLOUD = { url: '', key: '' };
-const CLOUD_ON = !!(CLOUD.url && CLOUD.key) && location.protocol.startsWith('http');
-let canEdit = false, cloudVersion = 0, cloudStatus = 'loading', cloudMsg = '', pushTimer = null, pushing = false, suppressPush = false;
-let passcode = '';
-try { passcode = localStorage.getItem(KEY + ':passcode') || ''; } catch (e) {}
+const CLOUD_ON = !!(CLOUD.url && CLOUD.key) && location.protocol.startsWith('http') && !!window.supabase;
+const sb = CLOUD_ON ? window.supabase.createClient(CLOUD.url, CLOUD.key) : null;
+let session = null, role = 'none', canEdit = false, myProfileId = null;
+let cloudVersion = 0, cloudStatus = 'loading', cloudMsg = '', pushTimer = null, pushing = false, suppressPush = false;
+let syncedState = '', syncedProfiles = {};
+const PROFILE_FIELDS = ['first', 'last', 'display', 'avatar', 'notes', 'email'];
+const profileRow = p => Object.fromEntries([['id', p.id], ...PROFILE_FIELDS.map(f => [f, p[f] ?? (f === 'avatar' || f === 'email' ? null : '')])]);
+// Tournament data only: profiles live in their own table; the viewed tournament is per device.
+const sharedState = () => JSON.stringify({ tournaments: db.tournaments });
 
-async function api(path, body) {
-  const res = await fetch(`${CLOUD.url}/rest/v1/${path}`, {
-    method: body ? 'POST' : 'GET',
-    headers: { apikey: CLOUD.key, Authorization: `Bearer ${CLOUD.key}`, 'Content-Type': 'application/json' },
-    body: body ? JSON.stringify(body) : undefined
-  });
-  const json = await res.json().catch(() => null);
-  if (!res.ok) throw new Error(json?.message || `HTTP ${res.status}`);
-  return json;
-}
 function setCloud(st, msg = '') { cloudStatus = st; cloudMsg = msg; renderFileBar(); }
 function renderCloudBar(bar) {
-  const time = () => new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  const me = session ? esc(session.user.email) : '';
   bar.className = 'filebar' + (cloudStatus === 'error' ? ' warn' : cloudStatus === 'loading' ? '' : ' ok');
-  if (cloudStatus === 'loading') bar.innerHTML = '<span class="dot"></span><span>Loading…</span>';
-  else if (cloudStatus === 'error') bar.innerHTML = `<span class="dot"></span><span>${esc(cloudMsg)}</span><button class="ghost" id="cloud-retry">Retry</button>`;
-  else if (!canEdit) bar.innerHTML = `<span class="dot"></span><span>View only</span>
-    <input id="cloud-pass" type="password" placeholder="Passcode" autocomplete="current-password" style="width:140px">
-    <button class="btn" id="cloud-unlock">Unlock editing</button>${cloudMsg ? `<span class="bad-txt">${esc(cloudMsg)}</span>` : ''}`;
-  else bar.innerHTML = `<span class="dot"></span><span>${cloudStatus === 'saving' ? 'Saving…' : `Synced${cloudMsg ? ' · ' + esc(cloudMsg) : ''}`}</span>
-    <button class="ghost" id="cloud-lock">Lock</button>`;
+  const status = cloudStatus === 'loading' ? 'Loading…' : cloudStatus === 'saving' ? 'Saving…' : cloudStatus === 'error' ? esc(cloudMsg) : `Synced${cloudMsg ? ' · ' + esc(cloudMsg) : ''}`;
+  bar.innerHTML = `<span class="dot"></span><span>${status}</span>${cloudStatus === 'error' ? '<button class="ghost" id="cloud-retry">Retry</button>' : ''}
+    <span class="muted" style="margin-left:auto">${me} · ${canEdit ? 'Admin' : 'Player'}</span><button class="ghost" id="cloud-signout">Sign out</button>`;
 }
-// Pull the shared data. quiet = background refresh (skip while someone is typing or a save is pending).
+function showScreen(which, note) {
+  $('login').classList.toggle('hidden', which === 'app');
+  $('app').classList.toggle('hidden', which !== 'app');
+  if (note !== undefined) $('login-note').innerHTML = note;
+  $('login-form').classList.toggle('hidden', which === 'unlinked');
+  $('login-signup').classList.toggle('hidden', which === 'unlinked');
+  $('login-forgot').textContent = which === 'unlinked' ? 'Sign out' : 'Forgot password?';
+}
+async function afterAuth() {
+  if (!session) { canEdit = false; myProfileId = null; return showScreen('login', 'Sign in to see the standings.'); }
+  const { data, error } = await sb.rpc('my_access');
+  if (error) return showScreen('login', `Couldn't check your access: ${esc(error.message)}`);
+  role = data.role; canEdit = role === 'admin'; myProfileId = data.profile_id;
+  if (role === 'none') return showScreen('unlinked', `You're signed in as <b>${esc(session.user.email)}</b>, but that email isn't linked to a player yet. Ask the organizer to add it to your player profile, then reload.`);
+  showScreen('app');
+  if (canEdit === false && myProfileId) profileId = profileId || myProfileId;
+  await cloudPull(false);
+}
+// Pull shared data. quiet = background refresh (skipped while typing or saving).
 async function cloudPull(quiet) {
+  if (!session || role === 'none') return;
+  if (quiet && (pushTimer || pushing || ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName))) return;
   try {
-    const [row] = await api('poker_state?id=eq.main&select=version,data');
-    if (!row) throw new Error('No data row yet. Run supabase-setup.sql first.');
-    if (quiet && (row.version === cloudVersion || pushTimer || pushing || ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName))) return;
-    cloudVersion = row.version;
-    if (row.data) {
-      db = normalizeDb(row.data); state = current();
-      suppressPush = true; save(); suppressPush = false;
-    }
+    const [st, pr] = await Promise.all([
+      sb.from('poker_state').select('version,data').eq('id', 'main').maybeSingle(),
+      sb.from('poker_profiles').select('id,' + PROFILE_FIELDS.join(','))
+    ]);
+    if (st.error || pr.error) throw new Error((st.error || pr.error).message);
+    if (!st.data) throw new Error('No data row yet. Run supabase-setup.sql first.');
+    const profiles = Object.fromEntries(pr.data.map(r => [r.id, r]));
+    const profJson = JSON.stringify(profiles);
+    if (quiet && st.data.version === cloudVersion && profJson === JSON.stringify(syncedProfiles)) return;
+    const keepId = db.currentId;
+    db = normalizeDb({ ...(st.data.data || {}), profiles, currentId: keepId });
+    state = current();
+    cloudVersion = st.data.version;
+    syncedState = st.data.data ? sharedState() : '';
+    syncedProfiles = JSON.parse(profJson);  // a separate copy, so local edits show up as differences
+    suppressPush = true; save(); suppressPush = false;
     if (cloudStatus !== 'saving') setCloud('ok', cloudStatus === 'ok' ? cloudMsg : '');
-    return row;
   } catch (e) { if (!quiet) setCloud('error', `Couldn't load data: ${e.message}`); }
 }
 function queueCloudPush() {
-  if (!CLOUD_ON || !canEdit || suppressPush) return;
+  if (!CLOUD_ON || !session || suppressPush || (!canEdit && !myProfileId)) return;
   clearTimeout(pushTimer); setCloud('saving');
   pushTimer = setTimeout(cloudPush, 600);
 }
 async function cloudPush() {
   pushTimer = null; pushing = true;
   try {
-    cloudVersion = await api('rpc/save_state', { p_passcode: passcode, p_data: db, p_version: cloudVersion });
+    // Profiles: the admin syncs all of them; a player only their own.
+    const ids = canEdit ? Object.keys(db.profiles) : [myProfileId];
+    for (const id of ids) {
+      const row = db.profiles[id] && profileRow(db.profiles[id]);
+      if (!row || JSON.stringify(row) === JSON.stringify(syncedProfiles[id] && profileRow(syncedProfiles[id]))) continue;
+      const { error } = canEdit
+        ? await sb.from('poker_profiles').upsert(row)
+        : await sb.from('poker_profiles').update(Object.fromEntries(PROFILE_FIELDS.filter(f => f !== 'email').map(f => [f, row[f]]))).eq('id', id);
+      if (error) throw new Error(error.message);
+      syncedProfiles[id] = row;
+    }
+    if (canEdit) {
+      for (const id of Object.keys(syncedProfiles).filter(id => !db.profiles[id])) {
+        const { error } = await sb.from('poker_profiles').delete().eq('id', id);
+        if (error) throw new Error(error.message);
+        delete syncedProfiles[id];
+      }
+      const shared = sharedState();
+      if (shared !== syncedState) {
+        const { data, error } = await sb.rpc('save_state', { p_data: JSON.parse(shared), p_version: cloudVersion });
+        if (error) throw new Error(error.message);
+        cloudVersion = data; syncedState = shared;
+      }
+    }
     setCloud('ok', 'saved ' + new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }));
   } catch (e) {
     if (/conflict/.test(e.message)) {
       alert('Someone else saved changes at the same time, so your last edit was not saved. Showing the latest data now.');
       await cloudPull(false);
-    } else if (/passcode/.test(e.message)) {
-      lockEditing('Passcode no longer works.');
-    } else setCloud('error', `Not saved: ${e.message}. Your change is kept on this device; edit again to retry.`);
+    } else setCloud('error', `Not saved: ${e.message}. Edit again to retry.`);
   } finally { pushing = false; }
 }
-function lockEditing(msg = '') {
-  canEdit = false; passcode = '';
-  try { localStorage.removeItem(KEY + ':passcode'); } catch (e) {}
-  cloudMsg = msg; render();
-}
-async function unlock(code) {
-  try {
-    if (!(await api('rpc/check_passcode', { p_passcode: code }))) return setCloud('ok', 'Wrong passcode');
-    passcode = code; canEdit = true;
-    try { localStorage.setItem(KEY + ':passcode', code); } catch (e) {}
-    cloudMsg = ''; render();
-  } catch (e) { setCloud('error', `Couldn't check passcode: ${e.message}`); }
-}
-document.addEventListener('click', e => {
-  if (e.target.id === 'cloud-unlock') unlock($('cloud-pass').value);
-  else if (e.target.id === 'cloud-lock') lockEditing();
-  else if (e.target.id === 'cloud-retry') cloudPull(false);
-});
-document.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.id === 'cloud-pass') unlock(e.target.value); });
+function loginMsg(m) { $('login-msg').innerHTML = m; }
 if (CLOUD_ON) {
-  (async () => {
-    const row = await cloudPull(false);
-    if (passcode) await unlock(passcode);
-    // First run: the database is empty, so the first editor's data becomes the shared copy.
-    if (row && !row.data && canEdit) queueCloudPush();
-  })();
+  showScreen('login');
+  $('login-form').addEventListener('submit', async e => {
+    e.preventDefault(); loginMsg('Signing in…');
+    const { error } = await sb.auth.signInWithPassword({ email: $('login-email').value.trim(), password: $('login-pass').value });
+    loginMsg(error ? `<span class="bad-txt">${esc(error.message)}</span>` : '');
+  });
+  $('login-signup').addEventListener('click', async () => {
+    const email = $('login-email').value.trim(), password = $('login-pass').value;
+    if (!email || password.length < 6) return loginMsg('<span class="bad-txt">Enter your email and a password (6+ characters) above, then click Create account.</span>');
+    const { error } = await sb.auth.signUp({ email, password, options: { emailRedirectTo: location.origin + location.pathname } });
+    loginMsg(error ? `<span class="bad-txt">${esc(error.message)}</span>` : 'Check your email for a confirmation link, then come back and sign in.');
+  });
+  $('login-forgot').addEventListener('click', async () => {
+    if (session) return sb.auth.signOut();
+    const email = $('login-email').value.trim();
+    if (!email) return loginMsg('<span class="bad-txt">Enter your email above first.</span>');
+    const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin + location.pathname });
+    loginMsg(error ? `<span class="bad-txt">${esc(error.message)}</span>` : 'Check your email for a link to reset your password.');
+  });
+  document.addEventListener('click', e => {
+    if (e.target.id === 'cloud-signout') sb.auth.signOut();
+    else if (e.target.id === 'cloud-retry') cloudPull(false);
+  });
+  sb.auth.onAuthStateChange((event, s) => {
+    const changed = (s?.user?.id || null) !== (session?.user?.id || null);
+    session = s;
+    if (event === 'PASSWORD_RECOVERY') {
+      const pw = prompt('Choose a new password (6+ characters)');
+      if (pw) sb.auth.updateUser({ password: pw }).then(({ error }) => alert(error ? error.message : 'Password updated.'));
+    }
+    if (changed || event === 'SIGNED_OUT') setTimeout(afterAuth, 0);  // run outside the auth callback
+  });
   setInterval(() => { if (!document.hidden) cloudPull(true); }, 15000);
   document.addEventListener('visibilitychange', () => { if (!document.hidden) cloudPull(true); });
 }
