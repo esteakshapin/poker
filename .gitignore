@@ -1,0 +1,5 @@
+# Personal data stays local; the live data lives in Supabase.
+poker-data.json
+*.crswap
+.claude/
+.DS_Store

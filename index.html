@@ -1,0 +1,1080 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Home Game Tracker</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f6f5f1; --card: #ffffff; --ink: #1d1f1c; --muted: #6b6f68; --line: #e2e0d8;
+    --accent: #1f6f4a; --accent-ink: #ffffff; --warn: #a14a1b; --gold: #b8860b; --silver: #7a7f87;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #141614; --card: #1d201d; --ink: #ecebe6; --muted: #9a9e96; --line: #2f332e;
+      --accent: #3fae7a; --accent-ink: #0d1a12; --warn: #e08a5a; --gold: #e0b44a; --silver: #b3b8bf;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+    font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  header { padding: 20px 16px 0; max-width: 960px; margin: 0 auto; }
+  h1 { margin: 0 0 4px; font-size: 22px; }
+  .sub { color: var(--muted); font-size: 13px; }
+  nav { display: flex; gap: 4px; margin-top: 16px; border-bottom: 1px solid var(--line); overflow-x: auto; }
+  nav button { background: none; border: none; padding: 10px 14px; font: inherit; color: var(--muted);
+    cursor: pointer; border-bottom: 2px solid transparent; white-space: nowrap; }
+  nav button.active { color: var(--ink); border-bottom-color: var(--accent); font-weight: 600; }
+  main { max-width: 960px; margin: 0 auto; padding: 16px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+  .card h2 { margin: 0 0 12px; font-size: 16px; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 16px; }
+  .stat { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+  .stat .k { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+  .stat .v { font-size: 22px; font-weight: 650; font-variant-numeric: tabular-nums; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  input, select { font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px;
+    background: var(--bg); color: var(--ink); min-width: 0; }
+  input[type=number] { width: 110px; }
+  button.btn { font: inherit; padding: 8px 14px; border-radius: 8px; border: 1px solid var(--accent);
+    background: var(--accent); color: var(--accent-ink); cursor: pointer; font-weight: 600; }
+  button.ghost { font: inherit; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--line);
+    background: transparent; color: var(--ink); cursor: pointer; }
+  button.link { background: none; border: none; color: var(--warn); cursor: pointer; font: inherit; padding: 2px 4px; }
+  .table-wrap { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+  td.num, th.num { text-align: right; }
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; border: 1px solid var(--line); color: var(--muted); }
+  .pill.ok { border-color: var(--accent); color: var(--accent); }
+  .pill.no { border-color: var(--warn); color: var(--warn); }
+  .pos { color: var(--accent); } .neg { color: var(--warn); }
+  .muted { color: var(--muted); }
+  .empty { color: var(--muted); padding: 12px 0; }
+  .grid-input { width: 90px; text-align: right; }
+  .grid-input.bad { border-color: var(--warn); }
+  .cell-note { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  tr.check td { font-size: 13px; }
+  .ok-txt { color: var(--accent); font-weight: 600; } .bad-txt { color: var(--warn); font-weight: 600; }
+  .alert { border: 1px solid var(--warn); border-radius: 10px; padding: 10px 14px; margin-bottom: 16px; background: var(--card); font-size: 14px; }
+  .alert b { color: var(--warn); }
+  .alert ul { margin: 6px 0 0; padding-left: 18px; }
+  .legend { display: flex; flex-wrap: wrap; gap: 10px; font-size: 13px; margin-top: 8px; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .legend i { width: 12px; height: 3px; border-radius: 2px; display: inline-block; }
+  .payout-row { display: flex; justify-content: space-between; align-items: baseline; padding: 10px 0; border-bottom: 1px solid var(--line); gap: 12px; }
+  .payout-row:last-child { border-bottom: none; }
+  .payout-row .amt { font-size: 20px; font-weight: 650; font-variant-numeric: tabular-nums; }
+  .note { font-size: 13px; color: var(--muted); margin-top: 8px; }
+  .hidden { display: none; }
+  .av { display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; flex: none; overflow: hidden;
+    color: #fff; font-weight: 700; object-fit: cover; vertical-align: middle; }
+  .who { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
+  .who:hover .nm { text-decoration: underline; }
+  .roster { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+  .roster button { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 14px 8px; border-radius: 10px;
+    border: 1px solid var(--line); background: var(--bg); color: var(--ink); font: inherit; cursor: pointer; }
+  .roster button.sel { border-color: var(--accent); }
+  .prof-head { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; }
+  .prof-head h2 { margin: 0; font-size: 22px; }
+  .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+  .form-grid label { font-size: 13px; color: var(--muted); }
+  .form-grid input, textarea { width: 100%; margin-top: 4px; }
+  textarea { font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--ink); }
+  .tbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
+  .tbar select { font-weight: 600; }
+  .ended-banner { border: 1px solid var(--accent); border-radius: 10px; padding: 10px 14px; margin-bottom: 16px; background: var(--card);
+    display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+  button:disabled, input:disabled, select:disabled { opacity: .6; cursor: not-allowed; }
+  #chart-mode button.on { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+  .filebar { margin-top: 10px; font-size: 13px; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--line);
+    background: var(--card); display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .filebar.warn { border-color: var(--warn); }
+  .filebar .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+  .filebar.ok .dot { background: var(--accent); } .filebar.warn .dot { background: var(--warn); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Home Game Tracker</h1>
+  <div class="tbar">
+    <label class="muted" for="t-select">Tournament</label>
+    <select id="t-select"></select>
+    <button class="ghost" id="t-new">+ New tournament</button>
+  </div>
+  <div class="sub" id="subtitle" style="margin-top:8px"></div>
+  <div class="filebar" id="filebar"></div>
+  <nav id="tabs">
+    <button data-tab="standings" class="active">Standings &amp; Payout</button>
+    <button data-tab="sessions">Sessions</button>
+    <button data-tab="players">Buy-ins</button>
+    <button data-tab="profiles">Players</button>
+    <button data-tab="performance">Performance</button>
+    <button data-tab="settings">Settings</button>
+  </nav>
+</header>
+<main>
+  <!-- STANDINGS -->
+  <section id="tab-standings">
+    <div id="ended-banner"></div>
+    <div class="stats" id="stats"></div>
+    <div id="check-alert"></div>
+    <div class="card">
+      <div class="row" style="justify-content:space-between;margin-bottom:8px">
+        <h2 style="margin:0" id="payout-title">Payout</h2>
+        <button class="btn" id="t-end">End tournament &amp; pay out</button>
+      </div>
+      <div id="payout"></div>
+    </div>
+    <div class="card">
+      <h2>Standings</h2>
+      <div class="table-wrap"><table id="standings"></table></div>
+      <div class="note" id="standings-note"></div>
+    </div>
+  </section>
+
+  <!-- SESSIONS -->
+  <section id="tab-sessions" class="hidden">
+    <div class="card">
+      <h2>Chip counts by session</h2>
+      <div class="row" style="margin-bottom:10px">
+        <button class="btn" id="add-session">+ Start session</button>
+        <button class="ghost" id="remove-session">Remove last session</button>
+      </div>
+      <p class="note" style="margin-top:0">Enter each player's chip stack at the <b>end</b> of a session. Leave blank if they didn't play. A filled-in cell counts as a session played.
+        The check rows compare what was counted with what should be on the table: everyone's stack coming in, plus that session's buy-ins.
+        Chips that go missing are lost and their value goes to the organization. More chips than expected, or a buy-in with no count, is flagged as an error.</p>
+      <div class="table-wrap"><table id="session-grid"></table></div>
+    </div>
+  </section>
+
+  <!-- PLAYERS -->
+  <section id="tab-players" class="hidden">
+    <div class="card">
+      <h2>Add player to this tournament</h2>
+      <form class="row" id="add-player">
+        <input id="new-player" placeholder="Name (new or existing)" list="profile-names" required autocomplete="off">
+        <datalist id="profile-names"></datalist>
+        <label class="row muted" style="gap:4px">with <input type="number" id="new-player-buyins" min="0" value="1" style="width:70px"> buy-in(s) in session
+          <select id="new-player-session"></select></label>
+        <button class="btn" type="submit">Add</button>
+      </form>
+    </div>
+    <div class="card">
+      <h2>Record a buy-in</h2>
+      <form class="row" id="add-buyin">
+        <select id="buyin-player" required></select>
+        <label class="row muted" style="gap:4px">count <input type="number" id="buyin-count" min="1" value="1" style="width:70px"></label>
+        <label class="row muted" style="gap:4px">session <select id="buyin-session"></select></label>
+        <button class="btn" type="submit">Add buy-in</button>
+      </form>
+    </div>
+    <div class="card">
+      <h2>Players</h2>
+      <div class="table-wrap"><table id="players"></table></div>
+    </div>
+    <div class="card">
+      <h2>Buy-in log</h2>
+      <div class="table-wrap"><table id="buyins"></table></div>
+    </div>
+  </section>
+
+  <!-- PROFILES -->
+  <section id="tab-profiles" class="hidden">
+    <div class="card" id="profile-card"></div>
+    <div class="card">
+      <h2>All players</h2>
+      <div class="roster" id="roster"></div>
+    </div>
+  </section>
+
+  <!-- PERFORMANCE -->
+  <section id="tab-performance" class="hidden">
+    <div class="card">
+      <div class="row" style="justify-content:space-between;margin-bottom:8px">
+        <h2 style="margin:0" id="chart-title">Profit / loss over sessions</h2>
+        <div class="row" style="gap:4px" id="chart-mode">
+          <button class="ghost" data-mode="net">Profit / loss</button>
+          <button class="ghost" data-mode="stack">Chip stack</button>
+        </div>
+      </div>
+      <div id="chart"></div>
+      <div class="legend" id="legend"></div>
+      <div class="note" id="chart-note"></div>
+    </div>
+    <div class="card">
+      <h2>Session results</h2>
+      <p class="note" style="margin-top:0">Chips won or lost in each session: end stack minus what the player brought in and bought that session.</p>
+      <div class="table-wrap"><table id="session-results"></table></div>
+    </div>
+    <div class="card">
+      <h2>Per-player summary</h2>
+      <div class="table-wrap"><table id="perf"></table></div>
+      <p class="note">Chips can't be cashed out, so money only changes hands at the end: the top 2 qualified players get their share of the prize pool and everyone else's buy-ins stay in the pot. "Money result" is what each player would win minus what they paid in, if the tournament ended now.</p>
+    </div>
+  </section>
+
+  <!-- SETTINGS -->
+  <section id="tab-settings" class="hidden">
+    <div class="card">
+      <h2>Tournament rules</h2>
+      <div class="row rules" style="gap:16px">
+        <label>Tournament name<br><input id="s-name" style="width:220px"></label>
+        <label>Buy-in ($)<br><input type="number" id="s-buyin" min="1"></label>
+        <label>Chips per buy-in<br><input type="number" id="s-chips" min="1"></label>
+        <label>Attendance to qualify (%)<br><input type="number" id="s-min" min="0" max="100"></label>
+      </div>
+      <div class="row rules" style="gap:16px;margin-top:12px">
+        <label>1st place %<br><input type="number" id="s-p1" min="0" max="100"></label>
+        <label>2nd place %<br><input type="number" id="s-p2" min="0" max="100"></label>
+        <label>Admin %<br><input type="number" id="s-admin" min="0" max="100"></label>
+      </div>
+      <div class="note" id="pct-warn"></div>
+      <div class="row" style="margin-top:14px"><button class="ghost" id="t-delete" style="color:var(--warn)">Delete this tournament</button></div>
+    </div>
+    <div class="card">
+      <h2>Data file &amp; backup</h2>
+      <p class="note file-only" style="margin-top:0">Data is always kept in this browser. In Chrome or Edge you can also link a data file (e.g. <code>poker-data.json</code> in your poker folder) and every change is saved to it automatically.</p>
+      <div class="row file-only" style="margin-bottom:10px">
+        <button class="ghost" id="file-new">Save to a new data file…</button>
+        <button class="ghost" id="file-open">Open existing data file…</button>
+        <button class="ghost" id="file-unlink">Unlink file</button>
+      </div>
+      <div class="row">
+        <button class="ghost" id="export">Export backup (.json)</button>
+        <label class="ghost" style="cursor:pointer">Import backup<input type="file" id="import" accept=".json,application/json" hidden></label>
+        <button class="ghost" id="reset" style="color:var(--warn)">Reset everything (all tournaments)</button>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+const KEY = 'poker-tournament-v1';
+const COLORS = ['#1f77b4', '#d95f02', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#17becf', '#bcbd22', '#7f7f7f', '#393b79', '#e7ba52'];
+// db = { tournaments: [tournament...], currentId }. `state` is always the tournament being viewed.
+const DEFAULTS = {
+  id: '', status: 'active', endedAt: null, final: null,  // final = payout snapshot taken when the tournament ends
+  settings: { name: 'Tournament 1', buyIn: 10, chipsPerBuyIn: 200, minPct: 75, p1: 70, p2: 20, admin: 10 },
+  sessions: [],  // {date} — session N is sessions[N-1]; added as you play
+  players: [],   // {id, name}
+  buyIns: [],    // {id, playerId, session, count}
+  chips: {}      // chips[session][playerId] = end-of-session stack
+};
+let db = load(), state = current();
+
+function load() {
+  try {
+    const raw = localStorage.getItem(KEY);
+    if (raw) return normalizeDb(JSON.parse(raw));
+  } catch (e) {}
+  return normalizeDb({});
+}
+const isTrackerData = d => d && (Array.isArray(d.tournaments) || Array.isArray(d.players));
+// Accepts the multi-tournament format, or a single tournament saved by earlier versions.
+function normalizeDb(d) {
+  const list = Array.isArray(d.tournaments) ? d.tournaments : Array.isArray(d.players) ? [d] : [];
+  const out = { profiles: { ...(d.profiles || {}) }, tournaments: list.map(normalize), currentId: d.currentId };
+  // Players are shared profiles; a tournament only lists which profile ids are in it.
+  out.tournaments.forEach(t => {
+    t.players = t.players.map(x => {
+      if (!out.profiles[x.id]) out.profiles[x.id] = makeProfile(x.name || 'Player', x.id);
+      return { id: x.id };
+    });
+  });
+  if (!out.tournaments.length) out.tournaments.push(normalize({}));
+  if (!out.tournaments.some(t => t.id === out.currentId)) out.currentId = out.tournaments.at(-1).id;
+  return out;
+}
+function current() { return db.tournaments.find(t => t.id === db.currentId); }
+function makeProfile(fullName, id = uid()) {
+  const parts = fullName.trim().split(/\s+/);
+  return { id, first: parts[0] || 'Player', last: parts.slice(1).join(' '), display: '', avatar: null, notes: '' };
+}
+const autoDisplay = p => p.last ? `${p.first} ${p.last[0].toUpperCase()}.` : p.first;
+const fullName = p => [p.first, p.last].filter(Boolean).join(' ');
+// Profile with its display name as `name`, plus a stable color.
+function prof(id) {
+  const p = db.profiles[id] || { id, first: '?', last: '', display: '', avatar: null };
+  const idx = Object.keys(db.profiles).indexOf(id);
+  return { ...p, name: p.display || autoDisplay(p), full: fullName(p), color: COLORS[(idx < 0 ? 0 : idx) % COLORS.length] };
+}
+const tPlayers = () => state.players.map(x => prof(x.id));
+function avatar(p, size = 26) {
+  const st = `width:${size}px;height:${size}px;font-size:${Math.round(size * 0.4)}px`;
+  if (p.avatar) return `<img class="av" src="${p.avatar}" alt="" style="${st}">`;
+  const ini = ((p.first || '?')[0] + (p.last ? p.last[0] : '')).toUpperCase();
+  return `<span class="av" style="${st};background:${p.color}">${esc(ini)}</span>`;
+}
+const who = (p, size) => `<span class="who" data-profile="${p.id}">${avatar(p, size)}<span class="nm">${esc(p.name)}</span></span>`;
+// Fill defaults and upgrade data saved by earlier versions (fixed sessions, minimum session count).
+function normalize(d) {
+  const st = { ...structuredClone(DEFAULTS), ...d, settings: { ...DEFAULTS.settings, ...(d.settings || {}) } };
+  if (!st.id) st.id = uid();
+  if (st.settings.name === 'Home Game Tournament') st.settings.name = 'Tournament 1';
+  delete st.settings.sessions; delete st.settings.minSessions;
+  if (!Array.isArray(d.sessions)) {
+    const used = [...Object.keys(st.chips).filter(k => Object.keys(st.chips[k] || {}).length), ...st.buyIns.map(b => b.session)].map(Number);
+    st.sessions = Array.from({ length: Math.max(1, ...used) }, () => ({ date: null }));
+  }
+  if (!st.sessions.length) st.sessions.push({ date: today() });
+  return st;
+}
+function today() { return new Date().toISOString().slice(0, 10); }
+function save() { try { localStorage.setItem(KEY, JSON.stringify(db)); } catch (e) {} render(); queueFileWrite(); queueCloudPush(); }
+function uid() { return Math.random().toString(36).slice(2, 10); }
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const money = n => '$' + (Math.round(n * 100) / 100).toLocaleString(undefined, { minimumFractionDigits: n % 1 ? 2 : 0, maximumFractionDigits: 2 });
+const num = n => n.toLocaleString();
+const sessionList = () => state.sessions.map((_, i) => i + 1);
+const fmtDate = d => d ? new Date(d + 'T12:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '';
+
+// ---------- derived data ----------
+function playerStats(p) {
+  const S = state.settings;
+  const buyInCount = state.buyIns.filter(b => b.playerId === p.id).reduce((a, b) => a + b.count, 0);
+  const history = sessionList().map(s => {
+    const v = state.chips[s]?.[p.id];
+    return v === undefined || v === '' || v === null ? null : Number(v);
+  });
+  const played = history.filter(v => v !== null).length;
+  let lastIdx = -1;
+  history.forEach((v, i) => { if (v !== null) lastIdx = i; });
+  const current = lastIdx >= 0 ? history[lastIdx] : null;
+  const chipsBought = buyInCount * S.chipsPerBuyIn;
+  const net = current === null ? null : current - chipsBought;
+  const best = history.filter(v => v !== null).reduce((m, v) => Math.max(m, v), -Infinity);
+  return {
+    ...p, buyInCount, invested: buyInCount * S.buyIn, chipsBought, history, played, current, net,
+    best: best === -Infinity ? null : best,
+    ...attendance(played)
+  };
+}
+// Eligible when the player has attended at least minPct of the sessions held so far (sessions with any chip count).
+function attendance(played) {
+  const held = sessionsWithData(), r = state.settings.minPct / 100;
+  const pct = held ? played / held : 0;
+  const eligible = held > 0 && played > 0 && pct >= r - 1e-9;
+  // Sessions in a row they'd need to attend to reach the threshold.
+  const needed = eligible ? 0 : r >= 1 ? (played < held ? Infinity : 1) : Math.max(1, Math.ceil((r * held - played) / (1 - r) - 1e-9));
+  return { held, pct, eligible, needed };
+}
+
+// Chip check per session: counted stacks should equal stacks brought in + that session's buy-ins.
+// A player is "at the table" in a session if they have a count or a buy-in there; absent players keep their stack.
+function sessionChecks() {
+  const S = state.settings, carried = {};
+  return sessionList().map(s => {
+    const counts = state.chips[s] || {}, buys = {};
+    state.buyIns.filter(b => b.session === s).forEach(b => { buys[b.playerId] = (buys[b.playerId] || 0) + b.count; });
+    const atTable = new Set([...Object.keys(counts), ...Object.keys(buys)]);
+    let start = 0, bought = 0, counted = 0; const missing = [];
+    atTable.forEach(pid => {
+      start += carried[pid] || 0; bought += (buys[pid] || 0) * S.chipsPerBuyIn;
+      if (counts[pid] === undefined) missing.push(pid); else counted += Number(counts[pid]);
+    });
+    Object.entries(counts).forEach(([pid, v]) => { carried[pid] = Number(v); });
+    const expected = start + bought;
+    return { s, start, bought, expected, counted, diff: counted - expected, missing, buys, empty: !atTable.size,
+      // Shortfalls are lost chips (value goes to the organization); surpluses and missing counts are errors.
+      lost: !missing.length && counted < expected ? expected - counted : 0,
+      ok: !atTable.size || (!missing.length && counted <= expected) };
+  });
+}
+function sessionsWithData() {
+  return sessionList().filter(s => state.chips[s] && Object.values(state.chips[s]).some(v => v !== '' && v !== null && v !== undefined)).length;
+}
+function allStats() { return tPlayers().map(playerStats); }
+function pot() { return state.buyIns.reduce((a, b) => a + b.count, 0) * state.settings.buyIn; }
+
+function ranked() {
+  return allStats().sort((a, b) => {
+    if (a.eligible !== b.eligible) return a.eligible ? -1 : 1;
+    return (b.current ?? -1) - (a.current ?? -1);
+  });
+}
+
+// Payout: rank eligible players by current stack. Ties share the combined prize for the places they occupy.
+function computePayout() {
+  const S = state.settings, gross = pot();
+  const lostChips = sessionChecks().reduce((a, c) => a + c.lost, 0);
+  const lostValue = Math.min(gross, lostChips * S.buyIn / S.chipsPerBuyIn);
+  const P = gross - lostValue; // prize pool the percentages apply to
+  const eligible = allStats().filter(p => p.eligible && p.current !== null).sort((a, b) => b.current - a.current);
+  const prizes = [S.p1, S.p2];
+  const results = [];
+  let place = 0;
+  let i = 0;
+  while (i < eligible.length && place < prizes.length) {
+    const tied = eligible.filter(p => p.current === eligible[i].current);
+    const share = prizes.slice(place, place + tied.length).reduce((a, b) => a + b, 0);
+    tied.forEach(p => results.push({ player: p, place: place + 1, pct: share / tied.length, amount: P * share / 100 / tied.length, tied: tied.length > 1 }));
+    place += tied.length; i += tied.length;
+  }
+  const unclaimed = prizes.slice(place).reduce((a, b) => a + b, 0);
+  return { pot: gross, pool: P, lostChips, lostValue, results, adminShare: P * S.admin / 100, admin: P * S.admin / 100 + lostValue, unclaimed: P * unclaimed / 100 };
+}
+
+// ---------- render ----------
+function render() {
+  const S = state.settings;
+  const done = sessionsWithData();
+  const ended = state.status === 'ended';
+  $('t-select').innerHTML = db.tournaments.map(t => `<option value="${t.id}"${t.id === state.id ? ' selected' : ''}>${esc(t.settings.name)}${t.status === 'ended' ? ' (ended)' : ''}</option>`).join('');
+  $('subtitle').textContent = `${ended ? 'Ended ' + fmtDate(state.endedAt) : 'In progress'} · $${S.buyIn} = ${num(S.chipsPerBuyIn)} chips · ${done} session${done === 1 ? '' : 's'} played · ${S.minPct}% attendance to qualify`;
+  renderStandings(done); renderSessions(); renderPlayers(); renderPerformance(); renderSettings(); renderProfiles();
+  document.querySelectorAll('main input, main select, main textarea, main button').forEach(el => { el.disabled = false; });
+  // An ended tournament is read-only until reopened.
+  document.querySelectorAll('#tab-sessions input, #tab-sessions button, #tab-players input, #tab-players select, #tab-players button, #tab-settings .rules input')
+    .forEach(el => { el.disabled = ended; });
+  // Online without the passcode: view only.
+  const viewOnly = CLOUD_ON && !canEdit;
+  if (viewOnly) document.querySelectorAll('main input, main select, main textarea, main button, #t-new')
+    .forEach(el => { if (!el.closest('#chart-mode, #roster') && !el.dataset.profile) el.disabled = true; });
+  else $('t-new').disabled = false;
+  $('t-end').classList.toggle('hidden', ended || viewOnly);
+  $('ended-banner').innerHTML = ended ? `<div class="ended-banner"><span><b>This tournament ended ${fmtDate(state.endedAt)}.</b> The payout below is final and the data is locked.</span>${viewOnly ? '' : '<button class="ghost" id="t-reopen">Reopen</button>'}</div>` : '';
+  document.querySelectorAll('.file-only').forEach(el => el.classList.toggle('hidden', CLOUD_ON));
+  renderFileBar();
+}
+
+function renderStandings(done) {
+  const S = state.settings, stats = allStats(), pay = computePayout();
+  const chipsInPlay = stats.reduce((a, p) => a + p.chipsBought, 0);
+  $('stats').innerHTML = [
+    ['Pot', money(pay.pot)],
+    ['Players', stats.length],
+    ['Buy-ins', state.buyIns.reduce((a, b) => a + b.count, 0)],
+    ['Sessions', done],
+    ['Chips issued', num(chipsInPlay)],
+    ['Chips counted', num(stats.reduce((a, p) => a + (p.current || 0), 0))],
+    ['Lost chips', pay.lostChips ? `${num(pay.lostChips)} <span class="muted" style="font-size:14px">(${money(pay.lostValue)})</span>` : '0'],
+  ].map(([k, v]) => `<div class="stat"><div class="k">${k}</div><div class="v">${v}</div></div>`).join('');
+
+  const bad = sessionChecks().filter(c => !c.ok);
+  const name = id => esc(prof(id).name);
+  $('check-alert').innerHTML = bad.length ? `<div class="alert"><b>Chip counts don't add up.</b> Fix these on the Sessions tab before paying out:<ul>${bad.map(c =>
+    `<li>Session ${c.s}: ${c.missing.length ? `no count for ${c.missing.map(name).join(', ')}` : ''}${c.missing.length && c.diff > 0 ? '; ' : ''}${c.diff > 0 ? `counted ${num(c.counted)}, expected ${num(c.expected)} (${num(c.diff)} extra chips)` : ''}</li>`).join('')}</ul></div>` : '';
+
+  const ended = state.status === 'ended';
+  $('payout-title').textContent = ended ? 'Final payout' : 'Payout';
+  let html = `<div class="note" style="margin:0 0 8px">${ended ? `Final payout after ${done} session${done === 1 ? '' : 's'}.` : done ? `Payout if the tournament ended now, after session ${done}. Updates live as sessions are added.` : 'No sessions counted yet.'}${pay.lostValue ? ` Pot ${money(pay.pot)} minus ${money(pay.lostValue)} of lost chips leaves a prize pool of ${money(pay.pool)}.` : ''}${bad.length ? ' <span class="bad-txt">Chip counts have errors, see above.</span>' : ''}</div>`;
+  const label = n => n === 1 ? '1st place' : n === 2 ? '2nd place' : `${n}th`;
+  if (!pay.results.length) html += `<div class="empty">No qualifying players yet. A player needs to attend at least ${S.minPct}% of the sessions played to be eligible.</div>`;
+  pay.results.forEach(r => {
+    html += `<div class="payout-row"><div class="row" style="gap:6px">${who(r.player, 30)} <span class="muted">· ${label(r.place)}${r.tied ? ' (tie, split)' : ''} · ${num(r.player.current)} chips · ${Math.round(r.pct * 10) / 10}%</span></div><div class="amt">${money(r.amount)}</div></div>`;
+  });
+  if (pay.unclaimed > 0) html += `<div class="payout-row"><div class="muted">Unclaimed (not enough qualifying players)</div><div class="amt muted">${money(pay.unclaimed)}</div></div>`;
+  html += `<div class="payout-row"><div>Organization / admin <span class="muted">· ${S.admin}% (${money(pay.adminShare)})${pay.lostValue ? ` + lost chips (${money(pay.lostValue)})` : ''}</span></div><div class="amt">${money(pay.admin)}</div></div>`;
+  $('payout').innerHTML = html;
+
+  const rows = ranked();
+  $('standings').innerHTML = rows.length ? `<thead><tr><th>#</th><th>Player</th><th class="num">Chips</th><th class="num">Attendance</th><th>Status</th><th class="num">Buy-ins</th><th class="num">Net chips</th></tr></thead><tbody>` +
+    rows.map((p, i) => `<tr><td>${p.eligible ? i + 1 : '–'}</td><td>${who(p)}</td><td class="num">${p.current === null ? '<span class="muted">–</span>' : num(p.current)}</td>
+      <td class="num">${p.played}/${p.held} <span class="muted">(${Math.round(p.pct * 100)}%)</span></td>
+      <td>${p.eligible ? '<span class="pill ok">Qualified</span>' : state.status === 'ended' || !isFinite(p.needed) ? '<span class="pill no">Not qualified</span>' : `<span class="pill">Needs ${p.needed} more in a row</span>`}</td>
+      <td class="num">${p.buyInCount} <span class="muted">(${money(p.invested)})</span></td>
+      <td class="num ${p.net > 0 ? 'pos' : p.net < 0 ? 'neg' : ''}">${p.net === null ? '–' : (p.net > 0 ? '+' : '') + num(p.net)}</td></tr>`).join('') + '</tbody>'
+    : '<tr><td class="empty">Add players on the Players &amp; Buy-ins tab.</td></tr>';
+  $('standings-note').textContent = `Chips = stack from the latest session the player played. Only players who attended at least ${S.minPct}% of the sessions played are ranked for the payout, so this updates as sessions are added.`;
+}
+
+function renderSessions() {
+  const players = tPlayers();
+  if (!players.length) { $('session-grid').innerHTML = '<tr><td class="empty">Add players first.</td></tr>'; return; }
+  const sess = sessionList(), checks = sessionChecks();
+  const foot = (label, f) => `<tr class="check"><td class="muted">${label}</td>${checks.map(c => `<td class="num">${c.empty ? '' : f(c)}</td>`).join('')}<td></td></tr>`;
+  $('session-grid').innerHTML = `<thead><tr><th>Player</th>${sess.map(s => `<th class="num">S${s}${state.sessions[s - 1].date ? `<div class="cell-note" style="text-transform:none">${fmtDate(state.sessions[s - 1].date)}</div>` : ''}</th>`).join('')}<th class="num">Played</th></tr></thead><tbody>` +
+    players.map(p => {
+      const st = playerStats(p);
+      return `<tr><td>${who(p)}</td>${sess.map(s => {
+        const v = state.chips[s]?.[p.id], c = checks[s - 1], b = c.buys[p.id];
+        return `<td class="num"><input class="grid-input${c.missing.includes(p.id) ? ' bad' : ''}" type="number" min="0" inputmode="numeric" data-s="${s}" data-p="${p.id}" value="${v ?? ''}">${b ? `<div class="cell-note">+${b} buy-in${b > 1 ? 's' : ''}</div>` : ''}</td>`;
+      }).join('')}<td class="num">${st.played}</td></tr>`;
+    }).join('') +
+    foot('Brought in', c => num(c.start)) +
+    foot('+ Buy-ins', c => num(c.bought)) +
+    foot('Expected', c => num(c.expected)) +
+    foot('Counted', c => num(c.counted)) +
+    foot('Check', c => c.ok ? (c.lost ? `<span class="muted">−${num(c.lost)} lost → org</span>` : '<span class="ok-txt">✓ OK</span>') :
+      `<span class="bad-txt">${c.missing.length ? `${c.missing.length} missing` : ''}${c.missing.length && c.diff > 0 ? ', ' : ''}${c.diff > 0 ? `+${num(c.diff)} extra` : ''}</span>`) +
+    '</tbody>';
+}
+
+function renderPlayers() {
+  const sessOpts = sessionList().map(s => `<option value="${s}">S${s}</option>`).join('');
+  const keep = (id, html) => { const el = $(id), v = el.value; el.innerHTML = html; if (v && [...el.options].some(o => o.value === v)) el.value = v; else if (el.options.length) el.value = el.options[el.options.length - 1].value; };
+  keep('new-player-session', sessOpts); keep('buyin-session', sessOpts);
+  keep('buyin-player', tPlayers().map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join(''));
+  const inT = new Set(state.players.map(x => x.id));
+  $('profile-names').innerHTML = Object.keys(db.profiles).filter(id => !inT.has(id)).map(id => `<option value="${esc(prof(id).full)}">`).join('');
+
+  const stats = allStats();
+  $('players').innerHTML = stats.length ? `<thead><tr><th>Player</th><th class="num">Buy-ins</th><th class="num">Paid in</th><th class="num">Chips bought</th><th></th></tr></thead><tbody>` +
+    stats.map(p => `<tr><td>${who(p)}</td><td class="num">${p.buyInCount}</td><td class="num">${money(p.invested)}</td><td class="num">${num(p.chipsBought)}</td>
+      <td class="num"><button class="ghost" data-profile="${p.id}">Profile</button> <button class="link" data-del-player="${p.id}">Remove</button></td></tr>`).join('') + '</tbody>'
+    : '<tr><td class="empty">No players yet.</td></tr>';
+
+  const log = [...state.buyIns].sort((a, b) => a.session - b.session);
+  $('buyins').innerHTML = log.length ? `<thead><tr><th>Session</th><th>Player</th><th class="num">Count</th><th class="num">Amount</th><th class="num">Chips</th><th></th></tr></thead><tbody>` +
+    log.map(b => `<tr data-buyin="${b.id}">
+      <td><select data-field="session">${sessionList().map(s => `<option value="${s}"${s === b.session ? ' selected' : ''}>S${s}</option>`).join('')}</select></td>
+      <td><select data-field="playerId">${tPlayers().map(p => `<option value="${p.id}"${p.id === b.playerId ? ' selected' : ''}>${esc(p.name)}</option>`).join('')}</select></td>
+      <td class="num"><input type="number" data-field="count" min="1" value="${b.count}" style="width:70px;text-align:right"></td><td class="num">${money(b.count * state.settings.buyIn)}</td><td class="num">${num(b.count * state.settings.chipsPerBuyIn)}</td>
+      <td class="num"><button class="link" data-del-buyin="${b.id}">Delete</button></td></tr>`).join('') + '</tbody>'
+    : '<tr><td class="empty">No buy-ins yet.</td></tr>';
+}
+
+// Per-player timeline. Each line starts at the beginning of the player's first session
+// (net 0 / stack = chips bought in), then has a point at the end of every session they played.
+function playerSeries(p) {
+  const S = state.settings;
+  let stack = null, bought = 0;
+  const pts = [], results = {};
+  sessionList().forEach(s => {
+    const b = state.buyIns.filter(x => x.playerId === p.id && x.session === s).reduce((a, x) => a + x.count, 0) * S.chipsPerBuyIn;
+    const v = state.chips[s]?.[p.id];
+    bought += b;
+    if (v === undefined || v === null || v === '') return;
+    if (!pts.length) pts.push({ pos: s - 1, s, start: true, net: 0, stack: bought, bought });
+    const prev = stack ?? 0;
+    stack = Number(v);
+    results[s] = { result: stack - prev - b, b };
+    pts.push({ pos: s, s, net: stack - bought, stack, bought, b, result: stack - prev - b });
+  });
+  return { pts, results };
+}
+let chartMode = 'net';
+try { chartMode = localStorage.getItem(KEY + ':chart') || 'net'; } catch (e) {}
+$('chart-mode').addEventListener('click', e => {
+  const m = e.target.dataset.mode; if (!m) return;
+  chartMode = m; try { localStorage.setItem(KEY + ':chart', m); } catch (e) {}
+  renderPerformance();
+});
+
+function niceStep(range) {
+  const raw = range / 4, mag = Math.pow(10, Math.floor(Math.log10(raw || 1)));
+  return [1, 2, 2.5, 5, 10].map(m => m * mag).find(st => st >= raw) || raw;
+}
+function renderPerformance() {
+  const S = state.settings, stats = allStats(), sess = sessionList(), n = sess.length;
+  const series = stats.map(playerSeries), payouts = computePayout().results;
+  const key = chartMode === 'stack' ? 'stack' : 'net';
+  document.querySelectorAll('#chart-mode button').forEach(b => b.classList.toggle('on', b.dataset.mode === key));
+  $('chart-title').textContent = key === 'net' ? 'Profit / loss over sessions' : 'Chip stack over sessions';
+
+  const W = 860, H = 320, L = 56, R = 20, T = 16, B = 30;
+  const vals = series.flatMap(se => se.pts.map(pt => pt[key]));
+  let lo = Math.min(0, ...vals), hi = Math.max(key === 'stack' ? S.chipsPerBuyIn : 0, ...vals);
+  if (hi === lo) hi = lo + S.chipsPerBuyIn;
+  const step = niceStep(hi - lo);
+  lo = Math.floor(lo / step) * step; hi = Math.ceil(hi / step) * step;
+  const bw = (W - L - R) / n;
+  const x = pos => L + pos * bw;
+  const y = v => T + (H - T - B) * (hi - v) / (hi - lo);
+  const signed = v => (v > 0 ? '+' : '') + num(v);
+
+  let svg = `<svg viewBox="0 0 ${W} ${H}" width="100%" style="max-width:${W}px;display:block" role="img" aria-label="${key === 'net' ? 'Profit and loss' : 'Chip stacks'} by session">`;
+  for (let v = lo; v <= hi + 1e-9; v += step) {
+    const zero = Math.abs(v) < 1e-9 && key === 'net';
+    svg += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="${zero ? 'var(--muted)' : 'var(--line)'}" ${zero ? 'stroke-width="1.5"' : ''}/>
+      <text x="${L - 8}" y="${y(v) + 4}" text-anchor="end" font-size="11" fill="var(--muted)">${key === 'net' ? signed(Math.round(v)) : num(Math.round(v))}</text>`;
+  }
+  for (let i = 0; i <= n; i++) svg += `<line x1="${x(i)}" x2="${x(i)}" y1="${T}" y2="${H - B}" stroke="var(--line)" stroke-dasharray="2 3"/>`;
+  sess.forEach(s => svg += `<text x="${x(s - 0.5)}" y="${H - 8}" text-anchor="middle" font-size="11" fill="var(--muted)">S${s}</text>`);
+  series.forEach((se, pi) => {
+    const c = stats[pi].color, name = esc(stats[pi].name);
+    if (!se.pts.length) return;
+    svg += `<path d="${se.pts.map((pt, i) => (i ? 'L' : 'M') + x(pt.pos) + ',' + y(pt[key])).join('')}" fill="none" stroke="${c}" stroke-width="2"/>`;
+    se.pts.forEach(pt => {
+      const tip = pt.start
+        ? `${name} joined in S${pt.s} · bought in ${num(pt.bought)} chips (${money(pt.bought * S.buyIn / S.chipsPerBuyIn)})`
+        : `${name} · end of S${pt.s}\nStack: ${num(pt.stack)}${pt.b ? `\nBought this session: ${num(pt.b)}` : ''}\nSession result: ${signed(pt.result)}\nOverall: ${signed(pt.net)} chips`;
+      svg += pt.start
+        ? `<circle cx="${x(pt.pos)}" cy="${y(pt[key])}" r="4" fill="var(--card)" stroke="${c}" stroke-width="2"><title>${tip}</title></circle>`
+        : `<circle cx="${x(pt.pos)}" cy="${y(pt[key])}" r="4" fill="${c}"><title>${tip}</title></circle>`;
+    });
+  });
+  // Avatars sit on each player's latest point (drawn last so they're on top).
+  series.forEach((se, pi) => {
+    const p = stats[pi], last = se.pts.at(-1); if (!last || last.start) return;
+    const cx = x(last.pos), cy = y(last[key]), r = 12, ini = ((p.first || '?')[0] + (p.last ? p.last[0] : '')).toUpperCase();
+    svg += `<g data-profile="${p.id}" style="cursor:pointer"><title>${esc(p.name)}: ${key === 'net' ? signed(last.net) : num(last.stack)}</title>
+      <clipPath id="clip-${p.id}"><circle cx="${cx}" cy="${cy}" r="${r}"/></clipPath>
+      <circle cx="${cx}" cy="${cy}" r="${r + 2}" fill="${p.color}"/>` +
+      (p.avatar ? `<image href="${p.avatar}" x="${cx - r}" y="${cy - r}" width="${2 * r}" height="${2 * r}" clip-path="url(#clip-${p.id})" preserveAspectRatio="xMidYMid slice"/>`
+        : `<text x="${cx}" y="${cy + 4}" text-anchor="middle" font-size="10" font-weight="700" fill="#fff">${esc(ini)}</text>`) + '</g>';
+  });
+  svg += '</svg>';
+  $('chart').innerHTML = stats.length ? svg : '<div class="empty">No data yet.</div>';
+  $('legend').innerHTML = stats.map(p => `<span class="who" data-profile="${p.id}"><i style="background:${p.color}"></i>${avatar(p, 20)}<span class="nm">${esc(p.name)}</span></span>`).join('');
+  $('chart-note').textContent = key === 'net'
+    ? 'Each line starts at 0 (hollow dot) when the player first sits down, so a player who joins in S3 starts at the beginning of S3. Points show overall profit or loss at the end of each session, with all buy-ins and rebuys subtracted. Hover a dot for details.'
+    : 'Each line starts (hollow dot) at the chips the player bought in with when they first sat down, then shows their stack at the end of each session they played. Rebuys add to the stack. Hover a dot for details.';
+
+  $('session-results').innerHTML = stats.length ? `<thead><tr><th>Player</th>${sess.map(s => `<th class="num">S${s}</th>`).join('')}<th class="num">Total</th></tr></thead><tbody>` +
+    stats.map((p, i) => {
+      const r = series[i].results;
+      const total = Object.values(r).reduce((a, x) => a + x.result, 0);
+      return `<tr><td>${who(p)}</td>${sess.map(s => r[s]
+        ? `<td class="num ${r[s].result > 0 ? 'pos' : r[s].result < 0 ? 'neg' : ''}">${signed(r[s].result)}${r[s].b ? `<div class="cell-note">bought ${num(r[s].b)}</div>` : ''}</td>`
+        : '<td class="num muted">–</td>').join('')}
+        <td class="num ${total > 0 ? 'pos' : total < 0 ? 'neg' : ''}"><b>${Object.keys(r).length ? signed(total) : '–'}</b></td></tr>`;
+    }).join('') + '</tbody>' : '<tr><td class="empty">No players yet.</td></tr>';
+
+  $('perf').innerHTML = stats.length ? `<thead><tr><th>Player</th><th>Joined</th><th class="num">Played</th><th class="num">Current</th><th class="num">Chips bought</th><th class="num">Net chips</th><th class="num">Paid in</th><th class="num">${state.status === 'ended' ? 'Payout' : 'Payout if ended now'}</th><th class="num">Money result</th></tr></thead><tbody>` +
+    stats.map((p, i) => {
+      const first = series[i].pts[0];
+      const cls = p.net > 0 ? 'pos' : p.net < 0 ? 'neg' : '';
+      const won = payouts.filter(r => r.player.id === p.id).reduce((a, r) => a + r.amount, 0), result = won - p.invested;
+      const mcls = result > 0 ? 'pos' : result < 0 ? 'neg' : '';
+      return `<tr><td>${who(p)}</td><td>${first ? 'S' + first.s : '<span class="muted">–</span>'}</td><td class="num">${p.played}</td><td class="num">${p.current === null ? '–' : num(p.current)}</td>
+        <td class="num">${num(p.chipsBought)}</td><td class="num ${cls}">${p.net === null ? '–' : signed(p.net)}</td>
+        <td class="num">${money(p.invested)}</td><td class="num">${won ? money(won) : '<span class="muted">$0</span>'}</td>
+        <td class="num ${mcls}">${(result > 0 ? '+' : result < 0 ? '−' : '') + money(Math.abs(result))}</td></tr>`;
+    }).join('') + '</tbody>' : '<tr><td class="empty">No players yet.</td></tr>';
+}
+
+function renderSettings() {
+  const S = state.settings;
+  const map = { 's-name': 'name', 's-buyin': 'buyIn', 's-chips': 'chipsPerBuyIn', 's-min': 'minPct', 's-p1': 'p1', 's-p2': 'p2', 's-admin': 'admin' };
+  for (const [id, k] of Object.entries(map)) if (document.activeElement !== $(id)) $(id).value = S[k];
+  const total = S.p1 + S.p2 + S.admin;
+  $('pct-warn').innerHTML = total === 100 ? 'Splits add up to 100%.' : `<span class="neg">Splits add up to ${total}%, not 100%.</span>`;
+}
+
+// ---------- profiles ----------
+let profileId = null;
+try { profileId = localStorage.getItem(KEY + ':profile'); } catch (e) {}
+// Run fn with `state` temporarily pointed at tournament t (stats helpers read the global).
+function inTournament(t, fn) { const prev = state; state = t; try { return fn(); } finally { state = prev; } }
+function openProfile(id) {
+  profileId = id; try { localStorage.setItem(KEY + ':profile', id); } catch (e) {}
+  document.querySelector('#tabs button[data-tab="profiles"]').click();
+  renderProfiles(); window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+function renderProfiles() {
+  const ids = Object.keys(db.profiles);
+  if (!db.profiles[profileId]) profileId = ids[0] || null;
+  $('roster').innerHTML = ids.length ? ids.map(id => { const p = prof(id);
+    return `<button data-profile="${id}" class="${id === profileId ? 'sel' : ''}">${avatar(p, 48)}<b>${esc(p.name)}</b><span class="muted" style="font-size:12px">${esc(p.full)}</span></button>`; }).join('')
+    : '<div class="empty">No players yet. Add them to a tournament on the Buy-ins tab.</div>';
+  if (!profileId) { $('profile-card').innerHTML = '<div class="empty">No players yet.</div>'; return; }
+  const p = prof(profileId), signed = v => (v > 0 ? '+' : '') + num(v);
+  const sgnMoney = v => (v > 0 ? '+' : v < 0 ? '−' : '') + money(Math.abs(v));
+
+  // Per-tournament records for this player.
+  const recs = db.tournaments.filter(t => t.players.some(x => x.id === p.id)).map(t => inTournament(t, () => {
+    const st = playerStats(p), se = playerSeries(p), pay = computePayout();
+    const won = t.status === 'ended' && t.final ? t.final.results.filter(r => r.playerId === p.id).reduce((a, r) => a + r.amount, 0)
+      : pay.results.filter(r => r.player.id === p.id).reduce((a, r) => a + r.amount, 0);
+    const place = (t.status === 'ended' && t.final ? t.final.results.find(r => r.playerId === p.id)?.place : pay.results.find(r => r.player.id === p.id)?.place) || null;
+    return { t, st, sessions: Object.values(se.results).map(r => r.result), won, place };
+  }));
+  const all = recs.flatMap(r => r.sessions);
+  const ended = recs.filter(r => r.t.status === 'ended');
+  const tiles = [
+    ['Tournaments', recs.length],
+    ['Sessions played', all.length],
+    ['Winning sessions', all.length ? `${all.filter(v => v > 0).length} <span class="muted" style="font-size:14px">(${Math.round(all.filter(v => v > 0).length / all.length * 100)}%)</span>` : '–'],
+    ['Best session', all.length ? signed(Math.max(...all)) : '–'],
+    ['Worst session', all.length ? signed(Math.min(...all)) : '–'],
+    ['Net chips (all)', recs.some(r => r.st.net !== null) ? signed(recs.reduce((a, r) => a + (r.st.net || 0), 0)) : '–'],
+    ['Paid in (all)', money(recs.reduce((a, r) => a + r.st.invested, 0))],
+    ['Money won (ended)', ended.length ? sgnMoney(ended.reduce((a, r) => a + r.won - r.st.invested, 0)) : '–'],
+  ];
+  const ph = p.display ? '' : autoDisplay(p);
+  $('profile-card').innerHTML = `
+    <div class="prof-head">${avatar(p, 84)}
+      <div><h2>${esc(p.name)}</h2><div class="muted">${esc(p.full)}</div>
+        <div class="row" style="margin-top:8px">
+          <label class="ghost" style="cursor:pointer;padding:6px 10px;border:1px solid var(--line);border-radius:8px">${p.avatar ? 'Change photo' : 'Add photo'}<input type="file" id="pf-avatar" accept="image/*" hidden></label>
+          ${p.avatar ? '<button class="link" id="pf-avatar-rm">Remove photo</button>' : ''}
+        </div></div></div>
+    <div class="form-grid">
+      <label>First name<input id="pf-first" value="${esc(p.first)}"></label>
+      <label>Last name<input id="pf-last" value="${esc(p.last)}"></label>
+      <label>Display name<input id="pf-display" value="${esc(p.display)}" placeholder="${esc(ph)} (automatic)"></label>
+    </div>
+    <label class="muted" style="display:block;margin-top:12px;font-size:13px">Notes<textarea id="pf-notes" rows="2" placeholder="Anything worth remembering">${esc(p.notes || '')}</textarea></label>
+    <div class="stats" style="margin-top:16px">${tiles.map(([k, v]) => `<div class="stat"><div class="k">${k}</div><div class="v">${v}</div></div>`).join('')}</div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Tournament</th><th>Status</th><th class="num">Attendance</th><th class="num">Buy-ins</th><th class="num">Chips</th><th class="num">Net chips</th><th class="num">Place</th><th class="num">Payout</th><th class="num">Money result</th></tr></thead>
+      <tbody>${recs.length ? recs.map(r => { const res = r.won - r.st.invested, live = r.t.status !== 'ended';
+        return `<tr><td>${esc(r.t.settings.name)}</td><td>${live ? '<span class="pill">In progress</span>' : '<span class="pill ok">Ended</span>'}</td>
+          <td class="num">${r.st.played}/${r.st.held}${r.st.eligible ? ' <span class="pill ok">Q</span>' : ''}</td><td class="num">${r.st.buyInCount} <span class="muted">(${money(r.st.invested)})</span></td>
+          <td class="num">${r.st.current === null ? '–' : num(r.st.current)}</td><td class="num ${r.st.net > 0 ? 'pos' : r.st.net < 0 ? 'neg' : ''}">${r.st.net === null ? '–' : signed(r.st.net)}</td>
+          <td class="num">${r.place ? (r.place === 1 ? '1st' : r.place === 2 ? '2nd' : r.place + 'th') : '–'}</td>
+          <td class="num">${money(r.won)}${live ? ' <span class="muted">(if ended now)</span>' : ''}</td>
+          <td class="num ${res > 0 ? 'pos' : res < 0 ? 'neg' : ''}">${sgnMoney(res)}</td></tr>`; }).join('')
+        : '<tr><td class="empty" colspan="9">Not in any tournament yet.</td></tr>'}</tbody></table></div>
+    <div class="row" style="margin-top:14px"><button class="link" id="pf-delete">Delete player</button></div>`;
+}
+$('profile-card').addEventListener('change', async e => {
+  const p = db.profiles[profileId]; if (!p) return;
+  const id = e.target.id;
+  if (id === 'pf-first') p.first = e.target.value.trim() || p.first;
+  else if (id === 'pf-last') p.last = e.target.value.trim();
+  else if (id === 'pf-display') p.display = e.target.value.trim();
+  else if (id === 'pf-notes') p.notes = e.target.value;
+  else if (id === 'pf-avatar' && e.target.files[0]) {
+    try { p.avatar = await squareImage(e.target.files[0], 160); } catch (err) { return alert("Couldn't read that image."); }
+  } else return;
+  save();
+});
+$('profile-card').addEventListener('click', e => {
+  const p = db.profiles[profileId]; if (!p) return;
+  if (e.target.id === 'pf-avatar-rm') { p.avatar = null; save(); }
+  else if (e.target.id === 'pf-delete') {
+    const used = db.tournaments.filter(t => t.players.some(x => x.id === p.id));
+    if (used.length) return alert(`${prof(p.id).name} is in ${used.map(t => t.settings.name).join(', ')}. Remove them from those tournaments first.`);
+    if (!confirm(`Delete ${prof(p.id).name}'s profile?`)) return;
+    delete db.profiles[p.id]; profileId = null; save();
+  }
+});
+// Center-crop an uploaded photo to a small square JPEG so it stays light in the data file.
+function squareImage(file, size) {
+  return new Promise((resolve, reject) => {
+    const img = new Image(), url = URL.createObjectURL(file);
+    img.onload = () => {
+      const c = document.createElement('canvas'), s = Math.min(img.width, img.height);
+      c.width = c.height = size;
+      c.getContext('2d').drawImage(img, (img.width - s) / 2, (img.height - s) / 2, s, s, 0, 0, size, size);
+      URL.revokeObjectURL(url); resolve(c.toDataURL('image/jpeg', 0.85));
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('bad image')); };
+    img.src = url;
+  });
+}
+// Any player name / avatar anywhere opens their profile.
+document.addEventListener('click', e => {
+  const el = e.target.closest('[data-profile]');
+  if (el && !el.closest('#roster')) { e.preventDefault(); openProfile(el.dataset.profile); }
+  else if (el) { profileId = el.dataset.profile; try { localStorage.setItem(KEY + ':profile', profileId); } catch (e) {} renderProfiles(); }
+});
+
+// ---------- events ----------
+$('tabs').addEventListener('click', e => {
+  const t = e.target.closest('button'); if (!t) return;
+  document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('active', b === t));
+  document.querySelectorAll('main > section').forEach(s => s.classList.toggle('hidden', s.id !== 'tab-' + t.dataset.tab));
+  try { localStorage.setItem(KEY + ':tab', t.dataset.tab); } catch (e) {}
+});
+try { const t = localStorage.getItem(KEY + ':tab'); if (t) document.querySelector(`#tabs button[data-tab="${t}"]`)?.click(); } catch (e) {}
+
+$('add-player').addEventListener('submit', e => {
+  e.preventDefault();
+  const name = $('new-player').value.trim(); if (!name) return;
+  const count = Math.max(0, parseInt($('new-player-buyins').value) || 0);
+  // Reuse an existing profile when the name matches its full or display name.
+  const lc = name.toLowerCase();
+  let id = Object.keys(db.profiles).find(k => { const p = prof(k); return p.full.toLowerCase() === lc || p.name.toLowerCase() === lc; });
+  if (id && state.players.some(x => x.id === id)) return alert(`${prof(id).name} is already in this tournament.`);
+  if (!id) { const p = makeProfile(name); db.profiles[p.id] = p; id = p.id; }
+  state.players.push({ id });
+  if (count) state.buyIns.push({ id: uid(), playerId: id, session: Number($('new-player-session').value), count });
+  $('new-player').value = ''; save(); $('new-player').focus();
+});
+$('add-buyin').addEventListener('submit', e => {
+  e.preventDefault();
+  const playerId = $('buyin-player').value; if (!playerId) return;
+  state.buyIns.push({ id: uid(), playerId, session: Number($('buyin-session').value), count: Math.max(1, parseInt($('buyin-count').value) || 1) });
+  save();
+});
+document.addEventListener('click', e => {
+  const d = e.target.dataset;
+  if (d.delPlayer) {
+    const p = prof(d.delPlayer);
+    if (!confirm(`Remove ${p.name} from this tournament and delete their buy-ins and chip counts here? (Their profile stays.)`)) return;
+    state.players = state.players.filter(x => x.id !== p.id);
+    state.buyIns = state.buyIns.filter(b => b.playerId !== p.id);
+    Object.values(state.chips).forEach(m => delete m[p.id]);
+    save();
+  } else if (d.delBuyin) {
+    if (!confirm('Delete this buy-in?')) return;
+    state.buyIns = state.buyIns.filter(b => b.id !== d.delBuyin); save();
+  }
+});
+$('t-select').addEventListener('change', e => { db.currentId = e.target.value; state = current(); save(); });
+$('t-new').addEventListener('click', () => {
+  const name = prompt('Name for the new tournament', `Tournament ${db.tournaments.length + 1}`);
+  if (!name || !name.trim()) return;
+  const carry = state.players.length && confirm(`Bring over the player list from ${state.settings.name}? (Chips and buy-ins start fresh.)`);
+  const t = normalize({ settings: { ...state.settings, name: name.trim() }, players: carry ? structuredClone(state.players) : [] });
+  db.tournaments.push(t); db.currentId = t.id; state = t; save();
+});
+$('t-end').addEventListener('click', () => {
+  const bad = sessionChecks().filter(c => !c.ok).length;
+  const pay = computePayout();
+  const lines = pay.results.map(r => `${r.player.name}: ${money(r.amount)}`).concat(`Organization: ${money(pay.admin)}`);
+  if (!confirm(`${bad ? 'Warning: some chip counts have errors.\n\n' : ''}End ${state.settings.name} and lock in this payout?\n\n${lines.join('\n')}`)) return;
+  state.status = 'ended'; state.endedAt = today();
+  state.final = { pot: pay.pot, pool: pay.pool, lostChips: pay.lostChips, admin: pay.admin, unclaimed: pay.unclaimed,
+    results: pay.results.map(r => ({ playerId: r.player.id, name: r.player.name, place: r.place, chips: r.player.current, amount: r.amount })) };
+  save();
+});
+document.addEventListener('click', e => {
+  if (e.target.id === 't-reopen' && confirm(`Reopen ${state.settings.name}? The payout goes back to live and the data becomes editable.`)) {
+    state.status = 'active'; state.endedAt = null; state.final = null; save();
+  }
+});
+$('t-delete').addEventListener('click', () => {
+  if (db.tournaments.length === 1) return alert('This is the only tournament. Use "Reset everything" to start over.');
+  if (prompt(`Type DELETE to permanently delete ${state.settings.name} and all its data.`) !== 'DELETE') return;
+  db.tournaments = db.tournaments.filter(t => t.id !== state.id);
+  db.currentId = db.tournaments.at(-1).id; state = current(); save();
+});
+$('add-session').addEventListener('click', () => {
+  const last = sessionChecks().at(-1);
+  if (last.empty && !confirm(`Session ${last.s} has no chip counts yet. Start session ${last.s + 1} anyway?`)) return;
+  state.sessions.push({ date: today() });
+  ['buyin-session', 'new-player-session'].forEach(id => { $(id).value = ''; });
+  save();
+});
+$('remove-session').addEventListener('click', () => {
+  const n = state.sessions.length;
+  if (n <= 1) return alert('There has to be at least one session.');
+  const hasData = Object.keys(state.chips[n] || {}).length || state.buyIns.some(b => b.session === n);
+  if (!confirm(hasData ? `Remove session ${n} and delete its chip counts and buy-ins?` : `Remove session ${n}?`)) return;
+  state.sessions.pop(); delete state.chips[n];
+  state.buyIns = state.buyIns.filter(b => b.session !== n);
+  save();
+});
+$('buyins').addEventListener('change', e => {
+  const f = e.target.dataset.field, row = e.target.closest('tr[data-buyin]'); if (!f || !row) return;
+  const b = state.buyIns.find(x => x.id === row.dataset.buyin); if (!b) return;
+  if (f === 'count') b.count = Math.max(1, parseInt(e.target.value) || 1);
+  else if (f === 'session') b.session = Number(e.target.value);
+  else b.playerId = e.target.value;
+  save();
+});
+$('session-grid').addEventListener('change', e => {
+  const el = e.target; if (!el.dataset.s) return;
+  const s = el.dataset.s, p = el.dataset.p;
+  state.chips[s] = state.chips[s] || {};
+  if (el.value === '') delete state.chips[s][p]; else state.chips[s][p] = Math.max(0, Number(el.value));
+  save();
+});
+document.querySelectorAll('#tab-settings input:not([type=file])').forEach(el => el.addEventListener('change', () => {
+  const S = state.settings;
+  S.name = $('s-name').value.trim() || DEFAULTS.settings.name;
+  const n = (id, min, fb) => { const v = Number($(id).value); return Number.isFinite(v) && v >= min ? v : fb; };
+  S.buyIn = n('s-buyin', 1, S.buyIn); S.chipsPerBuyIn = n('s-chips', 1, S.chipsPerBuyIn);
+  S.minPct = Math.min(100, n('s-min', 0, S.minPct));
+  S.p1 = n('s-p1', 0, S.p1); S.p2 = n('s-p2', 0, S.p2); S.admin = n('s-admin', 0, S.admin);
+  save();
+}));
+$('export').addEventListener('click', () => {
+  const blob = new Blob([JSON.stringify(db, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+  a.download = `poker-tournament-${new Date().toISOString().slice(0, 10)}.json`; a.click(); URL.revokeObjectURL(a.href);
+});
+$('import').addEventListener('change', async e => {
+  const f = e.target.files[0]; if (!f) return;
+  try {
+    const data = JSON.parse(await f.text());
+    if (!isTrackerData(data)) throw new Error('bad file');
+    if (!confirm('Replace current data with this backup?')) return;
+    db = normalizeDb(data); state = current(); save();
+  } catch (err) { alert('That file is not a valid backup.'); }
+  e.target.value = '';
+});
+$('reset').addEventListener('click', () => {
+  if (confirm('Delete ALL tournaments, players, buy-ins and chip counts? Export a backup first if unsure.')) { db = normalizeDb({}); state = current(); save(); }
+});
+
+// ---------- data file sync (File System Access API: Chrome / Edge) ----------
+const FS_OK = 'showSaveFilePicker' in window;
+let fileHandle = null, fileState = 'none', fileMsg = '', writeTimer = null;
+const FILE_TYPES = [{ description: 'Tracker data', accept: { 'application/json': ['.json'] } }];
+
+function idb(mode, fn) {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open('poker-tracker', 1);
+    req.onupgradeneeded = () => req.result.createObjectStore('kv');
+    req.onerror = () => reject(req.error);
+    req.onsuccess = () => {
+      const tx = req.result.transaction('kv', mode), r = fn(tx.objectStore('kv'));
+      tx.oncomplete = () => resolve(r && r.result); tx.onerror = () => reject(tx.error);
+    };
+  });
+}
+const storeHandle = h => idb('readwrite', s => h ? s.put(h, 'file') : s.delete('file')).catch(() => {});
+const loadHandle = () => idb('readonly', s => s.get('file')).catch(() => null);
+
+function setFile(st, msg) { fileState = st; fileMsg = msg; renderFileBar(); }
+function renderFileBar() {
+  const bar = $('filebar'), name = fileHandle ? esc(fileHandle.name) : '';
+  if (CLOUD_ON) return renderCloudBar(bar);
+  bar.className = 'filebar' + (fileState === 'ok' ? ' ok' : fileState === 'warn' || fileState === 'reconnect' ? ' warn' : '');
+  if (!FS_OK) bar.innerHTML = '<span class="dot"></span><span>Saved in this browser. Open in Chrome or Edge to also auto-save to a file, or use Export in Settings.</span>';
+  else if (fileState === 'ok') bar.innerHTML = `<span class="dot"></span><span>Auto-saving to <b>${name}</b>${fileMsg ? ' · ' + fileMsg : ''}</span>`;
+  else if (fileState === 'reconnect') bar.innerHTML = `<span class="dot"></span><span>Linked to <b>${name}</b>. Click to resume saving to it.</span><button class="btn" id="file-reconnect">Reconnect</button>`;
+  else if (fileState === 'warn') bar.innerHTML = `<span class="dot"></span><span>${fileMsg}</span><button class="ghost" id="file-new2">Pick a data file…</button>`;
+  else bar.innerHTML = '<span class="dot"></span><span>Saved in this browser only.</span><button class="ghost" id="file-new2">Also save to a file…</button>';
+  ['file-new', 'file-open', 'file-unlink'].forEach(id => { $(id).disabled = !FS_OK; });
+  $('file-unlink').classList.toggle('hidden', !fileHandle);
+}
+
+function queueFileWrite() {
+  if (!fileHandle || fileState !== 'ok') return;
+  clearTimeout(writeTimer);
+  writeTimer = setTimeout(writeFile, 300);
+}
+async function writeFile() {
+  try {
+    const w = await fileHandle.createWritable();
+    await w.write(JSON.stringify(db, null, 2)); await w.close();
+    setFile('ok', 'saved ' + new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' }));
+  } catch (e) { setFile('warn', `Couldn't save to ${esc(fileHandle.name)} (${esc(e.message)}). Data is still saved in this browser.`); }
+}
+async function readFile() {
+  const text = await (await fileHandle.getFile()).text();
+  if (!text.trim()) return false;
+  const data = JSON.parse(text);
+  if (!isTrackerData(data)) throw new Error('not a tracker data file');
+  db = normalizeDb(data); state = current();
+  try { localStorage.setItem(KEY, JSON.stringify(db)); } catch (e) {}
+  render(); return true;
+}
+async function linkNewFile() {
+  try {
+    fileHandle = await showSaveFilePicker({ suggestedName: 'poker-data.json', types: FILE_TYPES });
+    await storeHandle(fileHandle); fileState = 'ok'; await writeFile();
+  } catch (e) { if (e.name !== 'AbortError') alert('Could not create the file: ' + e.message); }
+}
+async function openFile() {
+  try {
+    const [h] = await showOpenFilePicker({ types: FILE_TYPES });
+    if (!confirm(`Load data from ${h.name}? This replaces what is shown now.`)) return;
+    fileHandle = h;
+    if (!(await readFile())) { alert('That file is empty; the current data will be saved into it.'); }
+    await storeHandle(fileHandle); fileState = 'ok'; await writeFile();
+  } catch (e) { if (e.name !== 'AbortError') alert('Could not open that file: ' + e.message); }
+}
+async function reconnect() {
+  try {
+    if ((await fileHandle.requestPermission({ mode: 'readwrite' })) !== 'granted') return;
+    await readFile(); setFile('ok', 'loaded from file');
+  } catch (e) { setFile('warn', `Couldn't open ${esc(fileHandle.name)} (${esc(e.message)}). It may have been moved or deleted.`); }
+}
+document.addEventListener('click', e => {
+  const id = e.target.id;
+  if (id === 'file-new' || id === 'file-new2') linkNewFile();
+  else if (id === 'file-open') openFile();
+  else if (id === 'file-reconnect') reconnect();
+  else if (id === 'file-unlink') { fileHandle = null; storeHandle(null); setFile('none', ''); }
+});
+// ---------- online sync (Supabase) ----------
+// Anyone with the link can view. Saving needs the passcode, which the database checks (see supabase-setup.sql).
+// The anon key is meant to be public; the passcode is what protects edits.
+const CLOUD = { url: '', key: '' };
+const CLOUD_ON = !!(CLOUD.url && CLOUD.key) && location.protocol.startsWith('http');
+let canEdit = false, cloudVersion = 0, cloudStatus = 'loading', cloudMsg = '', pushTimer = null, pushing = false, suppressPush = false;
+let passcode = '';
+try { passcode = localStorage.getItem(KEY + ':passcode') || ''; } catch (e) {}
+
+async function api(path, body) {
+  const res = await fetch(`${CLOUD.url}/rest/v1/${path}`, {
+    method: body ? 'POST' : 'GET',
+    headers: { apikey: CLOUD.key, Authorization: `Bearer ${CLOUD.key}`, 'Content-Type': 'application/json' },
+    body: body ? JSON.stringify(body) : undefined
+  });
+  const json = await res.json().catch(() => null);
+  if (!res.ok) throw new Error(json?.message || `HTTP ${res.status}`);
+  return json;
+}
+function setCloud(st, msg = '') { cloudStatus = st; cloudMsg = msg; renderFileBar(); }
+function renderCloudBar(bar) {
+  const time = () => new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  bar.className = 'filebar' + (cloudStatus === 'error' ? ' warn' : cloudStatus === 'loading' ? '' : ' ok');
+  if (cloudStatus === 'loading') bar.innerHTML = '<span class="dot"></span><span>Loading…</span>';
+  else if (cloudStatus === 'error') bar.innerHTML = `<span class="dot"></span><span>${esc(cloudMsg)}</span><button class="ghost" id="cloud-retry">Retry</button>`;
+  else if (!canEdit) bar.innerHTML = `<span class="dot"></span><span>View only</span>
+    <input id="cloud-pass" type="password" placeholder="Passcode" autocomplete="current-password" style="width:140px">
+    <button class="btn" id="cloud-unlock">Unlock editing</button>${cloudMsg ? `<span class="bad-txt">${esc(cloudMsg)}</span>` : ''}`;
+  else bar.innerHTML = `<span class="dot"></span><span>${cloudStatus === 'saving' ? 'Saving…' : `Synced${cloudMsg ? ' · ' + esc(cloudMsg) : ''}`}</span>
+    <button class="ghost" id="cloud-lock">Lock</button>`;
+}
+// Pull the shared data. quiet = background refresh (skip while someone is typing or a save is pending).
+async function cloudPull(quiet) {
+  try {
+    const [row] = await api('poker_state?id=eq.main&select=version,data');
+    if (!row) throw new Error('No data row yet. Run supabase-setup.sql first.');
+    if (quiet && (row.version === cloudVersion || pushTimer || pushing || ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName))) return;
+    cloudVersion = row.version;
+    if (row.data) {
+      db = normalizeDb(row.data); state = current();
+      suppressPush = true; save(); suppressPush = false;
+    }
+    if (cloudStatus !== 'saving') setCloud('ok', cloudStatus === 'ok' ? cloudMsg : '');
+    return row;
+  } catch (e) { if (!quiet) setCloud('error', `Couldn't load data: ${e.message}`); }
+}
+function queueCloudPush() {
+  if (!CLOUD_ON || !canEdit || suppressPush) return;
+  clearTimeout(pushTimer); setCloud('saving');
+  pushTimer = setTimeout(cloudPush, 600);
+}
+async function cloudPush() {
+  pushTimer = null; pushing = true;
+  try {
+    cloudVersion = await api('rpc/save_state', { p_passcode: passcode, p_data: db, p_version: cloudVersion });
+    setCloud('ok', 'saved ' + new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }));
+  } catch (e) {
+    if (/conflict/.test(e.message)) {
+      alert('Someone else saved changes at the same time, so your last edit was not saved. Showing the latest data now.');
+      await cloudPull(false);
+    } else if (/passcode/.test(e.message)) {
+      lockEditing('Passcode no longer works.');
+    } else setCloud('error', `Not saved: ${e.message}. Your change is kept on this device; edit again to retry.`);
+  } finally { pushing = false; }
+}
+function lockEditing(msg = '') {
+  canEdit = false; passcode = '';
+  try { localStorage.removeItem(KEY + ':passcode'); } catch (e) {}
+  cloudMsg = msg; render();
+}
+async function unlock(code) {
+  try {
+    if (!(await api('rpc/check_passcode', { p_passcode: code }))) return setCloud('ok', 'Wrong passcode');
+    passcode = code; canEdit = true;
+    try { localStorage.setItem(KEY + ':passcode', code); } catch (e) {}
+    cloudMsg = ''; render();
+  } catch (e) { setCloud('error', `Couldn't check passcode: ${e.message}`); }
+}
+document.addEventListener('click', e => {
+  if (e.target.id === 'cloud-unlock') unlock($('cloud-pass').value);
+  else if (e.target.id === 'cloud-lock') lockEditing();
+  else if (e.target.id === 'cloud-retry') cloudPull(false);
+});
+document.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.id === 'cloud-pass') unlock(e.target.value); });
+if (CLOUD_ON) {
+  (async () => {
+    const row = await cloudPull(false);
+    if (passcode) await unlock(passcode);
+    // First run: the database is empty, so the first editor's data becomes the shared copy.
+    if (row && !row.data && canEdit) queueCloudPush();
+  })();
+  setInterval(() => { if (!document.hidden) cloudPull(true); }, 15000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) cloudPull(true); });
+}
+
+(async () => {
+  if (!FS_OK || CLOUD_ON) return;
+  const h = await loadHandle(); if (!h) return;
+  fileHandle = h;
+  try {
+    if ((await h.queryPermission({ mode: 'readwrite' })) === 'granted') { await readFile(); setFile('ok', 'loaded from file'); }
+    else setFile('reconnect', '');
+  } catch (e) { setFile('reconnect', ''); }
+})();
+
+render();
+renderFileBar();
+</script>
+</body>
+</html>
