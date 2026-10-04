@@ -289,7 +289,7 @@ async function tableView(tableId) {
         <div class="plate">
           <div class="front">${badges}${stack > 0 ? chips(stack, 4, 9, true) : ''}</div>
           <div class="who">${avatar(p, 22)}<div><div class="nm">${esc(p.name)}</div>
-            <div class="stack">${num(stack)}${status ? ` <span class="st">${status}</span>` : ''}</div></div></div>
+            <div class="stack">${num(stack)}${won ? ` <span class="plus">+${num(pl.won)}</span>` : ''}${status ? ` <span class="st">${status}</span>` : ''}</div></div></div>
           ${turn ? '<div class="timer" data-timer></div>' : ''}
         </div></div>`;
       if (pl && pl.bet > 0 && isLive) {
@@ -306,10 +306,16 @@ async function tableView(tableId) {
       const pots = h.results.pots.filter(p => p.contested || h.results.pots.length === 1);
       msg = pots.map(p => `${p.winners.map(w => esc(prof(w).name)).join(' & ')} ${p.winners.length > 1 ? 'split' : 'wins'} ${num(p.amount)}`).join(' · ');
     } else if (!isLive) msg = S.seats.filter(s => s && !s.sittingOut && s.stack > 0).length < 2 ? 'Waiting for players…' : S.handNo === 0 ? 'Ready when you are.' : 'Next hand starting…';
+    // At showdown, light up the winning five cards and dim the rest.
+    let winning = null;
+    if (h?.results?.endedBy === 'showdown') {
+      const top = h.players.filter(p => p.hole && p.won > 0 && winners.get(p.profileId) > 0);
+      if (top.length) winning = new Set(top.flatMap(p => bestHand([...p.hole, ...h.board]).cards));
+    }
     let board = '';
     if (h) {
       const known = h.board.filter((_, i) => born.has(`board:${hid}:${i}`)).length;
-      board = h.board.map((c, i) => flipCard(c, '', anim(`board:${hid}:${i}`, 'flipin', 450, Math.max(0, i - known) * 180))).join('');
+      board = h.board.map((c, i) => flipCard(c, '', anim(`board:${hid}:${i}`, 'flipin', 450, Math.max(0, i - known) * 180), winning && !winning.has(c) ? 'faded' : '')).join('');
     }
     const inMiddle = h && isLive ? h.pot - h.players.reduce((a, p) => a + p.bet, 0) : 0;
     html += `<div class="center" style="top:${boardY.toFixed(1)}%">
@@ -344,14 +350,18 @@ async function tableView(tableId) {
       const word = o.isBet ? 'BET' : 'RAISE';
       if (raiseOpen && o.canRaise) {
         if (raiseTo === null || raiseTo < o.minTo || raiseTo > o.maxTo) raiseTo = o.minTo;
-        const presets = [['MIN', o.minTo], ['½ POT', o.currentBet + Math.round((o.pot + o.toCall) / 2)], ['¾ POT', o.currentBet + Math.round((o.pot + o.toCall) * 0.75)], ['POT', o.currentBet + o.pot + o.toCall], ['ALL IN', o.maxTo]]
+        const presets = [[o.isBet ? 'MIN BET' : 'MIN RAISE', o.minTo], ['1/2 POT', o.currentBet + Math.round((o.pot + o.toCall) / 2)], ['3/4 POT', o.currentBet + Math.round((o.pot + o.toCall) * 0.75)], ['POT', o.currentBet + o.pot + o.toCall], ['ALL IN', o.maxTo]]
           .map(([l, v]) => [l, Math.max(o.minTo, Math.min(o.maxTo, v))]);
-        el.innerHTML = `<div class="actions raise-panel">
-          <div class="presets">${presets.map(([l, v]) => `<button class="act small" data-preset="${v}">${l}</button>`).join('')}</div>
-          <div class="sizer"><input type="number" id="raise-num" min="${o.minTo}" max="${o.maxTo}" value="${raiseTo}">
-            <input type="range" id="raise-range" min="${o.minTo}" max="${o.maxTo}" value="${raiseTo}"></div>
-          <button class="act" data-back>BACK<kbd>esc</kbd></button>
-          <button class="act go" data-act="raise" id="raise-btn">${word}${o.isBet ? '' : ' TO'} ${num(raiseTo)}<kbd>↵</kbd></button></div>`;
+        const bb = S.config.bigBlind;
+        el.innerHTML = `<div class="raise-ui">
+          <div class="yourbet"><label for="raise-num">Your bet</label>
+            <div class="betbox"><input type="number" id="raise-num" inputmode="numeric" min="${o.minTo}" max="${o.maxTo}" value="${raiseTo}"><span class="bbs" id="raise-bb">${+(raiseTo / bb).toFixed(1)}BB</span></div></div>
+          <div class="sizing">
+            <div class="presets">${presets.map(([l, v]) => `<button data-preset="${v}">${l}</button>`).join('')}</div>
+            <div class="slide"><button data-step="-1" aria-label="Less">−</button><input type="range" id="raise-range" min="${o.minTo}" max="${o.maxTo}" step="1" value="${raiseTo}"><button data-step="1" aria-label="More">+</button></div>
+          </div>
+          <div class="confirm"><button class="back" data-back>BACK<kbd>ESC</kbd></button><button class="doraise" data-act="raise" id="raise-btn">${word}<kbd>↵</kbd></button></div>
+        </div>`;
         return;
       }
       el.innerHTML = `<div class="turn-note">YOUR TURN</div><div class="actions">
@@ -415,11 +425,12 @@ async function tableView(tableId) {
     if (d.sit !== undefined) send('sit', { seat: +d.sit });
     else if (d.out !== undefined) send('sit_out', { out: d.out === '1' });
     else if (d.preset) { raiseTo = +d.preset; render(); }
-    else if (d.raiseOpen !== undefined) { raiseOpen = true; raiseTo = null; render(); }
+    else if (d.raiseOpen !== undefined) { raiseOpen = true; raiseTo = null; render(); if (matchMedia('(pointer: fine)').matches) $('raise-num')?.select(); }
+    else if (d.step) { const o = myOptions(); if (o) { raiseTo = Math.max(o.minTo, Math.min(o.maxTo, (raiseTo ?? o.minTo) + (+d.step) * S.config.bigBlind)); render(); } }
     else if (d.back !== undefined) { raiseOpen = false; render(); }
     else if (d.pre !== undefined) { preAction = !preAction; render(); }
     else if (d.close !== undefined) { if (confirm('End the session? No more hands can be played at this table, all seeds are revealed, and a tournament table is saved to the tracker.')) send('close'); }
-    else if (d.act === 'raise') { raiseOpen = false; send('act', { type: 'raise', amount: raiseTo }); }
+    else if (d.act === 'raise') { const o = myOptions(); raiseOpen = false; send('act', { type: 'raise', amount: o ? Math.max(o.minTo, Math.min(o.maxTo, raiseTo)) : raiseTo }); }
     else if (d.act === 'leave') { if (confirm('Leave the table? Your stack is kept if you come back this session.')) send('leave'); }
     else if (d.act === 'start' || d.act === 'rebuy') send(d.act);
     else if (d.act) send('act', { type: d.act });
@@ -428,7 +439,7 @@ async function tableView(tableId) {
     if (e.target.id !== 'raise-range' && e.target.id !== 'raise-num') return;
     raiseTo = Math.floor(+e.target.value) || raiseTo;
     const other = $(e.target.id === 'raise-range' ? 'raise-num' : 'raise-range'); if (other) other.value = raiseTo;
-    if ($('raise-btn')) $('raise-btn').firstChild.textContent = `${S.hand.currentBet === 0 ? 'BET' : 'RAISE TO'} ${num(raiseTo)}`;
+    if ($('raise-bb')) $('raise-bb').textContent = `${+(raiseTo / S.config.bigBlind).toFixed(1)}BB`;
   };
   const onKey = e => {
     if (e.metaKey || e.ctrlKey || e.altKey) return;

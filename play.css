@@ -96,7 +96,7 @@ body.in-table { overflow: hidden; background: #262626; }
 .seat .who .av { width: 1.9em !important; height: 1.9em !important; font-size: .8em !important; }
 .seat .nm { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #cfcfcf; }
 .seat .stack { font-variant-numeric: tabular-nums; font-weight: 800; font-size: 1.1em; white-space: nowrap; }
-.seat .stack .plus { color: #37c978; } .seat .stack .st { font-size: .75em; font-weight: 600; opacity: .7; text-transform: uppercase; }
+.seat .stack .st { font-size: .75em; font-weight: 600; opacity: .7; text-transform: uppercase; }
 .seat.turn .plate { background: #fff; color: #1d1d1d; box-shadow: 0 0 28px 8px rgba(255,255,255,.35); }
 .seat.turn .nm { color: #555; }
 .seat.out { opacity: .5; }
@@ -166,18 +166,44 @@ body.in-table { overflow: hidden; background: #262626; }
 .act:disabled { opacity: .28; cursor: default; }
 .act kbd { position: absolute; top: -9px; right: 12px; background: #262626; padding: 0 5px; font: inherit; font-size: 10px; color: inherit; }
 .act.small { min-width: 0; min-height: 40px; font-size: 13px; padding: 4px 12px; }
-.raise-panel { align-items: center; }
-.raise-panel .presets { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
-.raise-panel .sizer { display: flex; gap: 8px; align-items: center; flex: 1 1 220px; }
-.raise-panel input[type=number] { width: 96px; height: 44px; font-size: 18px; font-weight: 800; background: #1b1b1b; color: #fff; border: 2px solid #555; border-radius: 8px; text-align: center; }
-.raise-panel input[type=range] { flex: 1; min-width: 100px; padding: 0; accent-color: #37c978; height: 30px; }
+/* raise card: "Your bet" box, sizing presets + slider, BACK / RAISE */
+.raise-ui { display: grid; grid-template-columns: minmax(150px, 220px) minmax(260px, 520px) auto; gap: 10px; align-items: stretch; align-self: flex-end; max-width: 100%; }
+.raise-ui button { font: inherit; cursor: pointer; }
+.yourbet { background: #2f2f2f; border-radius: 8px; padding: 8px 8px 10px; display: flex; flex-direction: column; gap: 6px; }
+.yourbet label { text-align: center; color: #9a9a9a; font-size: 18px; font-weight: 600; }
+.betbox { position: relative; background: #262626; border: 2px solid #3d3d3d; border-radius: 6px; flex: 1; display: flex; align-items: center; }
+.betbox input { width: 100%; background: transparent; border: none; outline: none; color: #fff; font: inherit; font-size: 38px; font-weight: 800; text-align: center; padding: 2px 6px; -moz-appearance: textfield; }
+.betbox input::-webkit-outer-spin-button, .betbox input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.betbox input::selection { background: #2f9e62; }
+.betbox .bbs { position: absolute; top: 3px; right: 6px; color: #f6e04d; font-size: 12px; font-weight: 700; }
+.sizing { background: #2f2f2f; border-radius: 8px; padding: 6px; display: flex; flex-direction: column; gap: 6px; }
+.sizing .presets { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; flex: 1; }
+.sizing .presets button { background: #262626; border: 2px solid #444; border-radius: 6px; color: #f0f0f0; font-weight: 800; font-size: 13px; letter-spacing: .06em; min-height: 46px; padding: 2px; }
+.sizing .presets button:hover { border-color: #777; }
+.slide { display: flex; align-items: center; background: #262626; border-radius: 6px; min-height: 46px; }
+.slide button { width: 52px; align-self: stretch; background: #333; border: none; color: #fff; font-size: 26px; font-weight: 700; line-height: 1; }
+.slide button:first-child { border-radius: 6px 0 0 6px; } .slide button:last-child { border-radius: 0 6px 6px 0; }
+.slide input[type=range] { flex: 1; min-width: 60px; margin: 0 12px; padding: 0; height: 8px; border: none; border-radius: 999px; background: #555; -webkit-appearance: none; appearance: none; }
+.slide input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 26px; height: 26px; border-radius: 50%; background: #f5b02e; border: none; box-shadow: 0 1px 4px rgba(0,0,0,.5); cursor: pointer; }
+.slide input[type=range]::-moz-range-thumb { width: 26px; height: 26px; border-radius: 50%; background: #f5b02e; border: none; }
+.confirm { display: flex; gap: 10px; align-items: flex-end; }
+.confirm button { position: relative; min-width: 128px; min-height: 92px; border: none; border-radius: 6px; font-size: 22px; font-weight: 800; color: #fff; border-bottom: 4px solid rgba(0,0,0,.25); }
+.confirm .back { background: #7d7d7d; } .confirm .doraise { background: #3faa68; }
+.confirm button:active { transform: translateY(2px); }
+.confirm kbd { position: absolute; top: -9px; left: 50%; transform: translateX(-50%); background: #fff; color: #222; border-radius: 3px; padding: 0 6px; font: inherit; font-size: 11px; font-weight: 800; }
+.pc.faded { opacity: .38; }
+.seat .stack .plus { background: #5d8f3a; color: #fff; border-radius: 4px; padding: 0 .35em; font-size: .85em; }
 @media (max-width: 640px) {
   .controls { align-items: stretch; padding: 6px 8px max(10px, env(safe-area-inset-bottom)); }
   .turn-note { text-align: right; font-size: 13px; }
   .actions { gap: 6px; }
   .act { flex: 1 1 0; min-width: 0; min-height: 54px; font-size: 14px; padding: 6px 4px; }
   .act.small { flex: 1 1 auto; min-height: 36px; font-size: 12px; }
-  .raise-panel .presets { flex-basis: 100%; } .raise-panel .sizer { flex-basis: 100%; }
+  .raise-ui { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "bet confirm" "sizing confirm"; align-self: stretch; gap: 6px; }
+  .yourbet { grid-area: bet; padding: 4px 6px 6px; gap: 2px; } .yourbet label { font-size: 13px; } .betbox input { font-size: 28px; }
+  .sizing { grid-area: sizing; padding: 4px; gap: 4px; } .sizing .presets { gap: 3px; } .sizing .presets button { font-size: 9px; min-height: 34px; letter-spacing: .02em; border-width: 1px; }
+  .slide { min-height: 36px; } .slide button { width: 38px; font-size: 22px; }
+  .confirm { grid-area: confirm; gap: 6px; } .confirm button { min-width: 64px; min-height: 56px; font-size: 14px; } .confirm kbd { display: none; }
   .tv-title b { display: none; } .tv-title span { font-size: 12px; }
   .tv-top { gap: 5px; padding-left: 8px; padding-right: 8px; } .tv button.ghost { padding: 5px 7px; font-size: 11px; }
 }
