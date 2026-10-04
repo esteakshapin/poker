@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Home Game Tracker</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="config.js"></script>
 <style>
   :root {
     color-scheme: light dark;
@@ -121,6 +122,7 @@
     <label class="muted" for="t-select">Tournament</label>
     <select id="t-select"></select>
     <button class="ghost" id="t-new">+ New tournament</button>
+    <a class="ghost hidden" id="play-link" href="play.html" style="margin-left:auto;padding:6px 10px;border:1px solid var(--line);border-radius:8px;text-decoration:none;color:var(--ink)">♠ Play online</a>
   </div>
   <div class="sub" id="subtitle" style="margin-top:8px"></div>
   <div class="filebar" id="filebar"></div>
@@ -1006,7 +1008,7 @@ document.addEventListener('click', e => {
 // Sign-in with Supabase Auth. The database decides access (see supabase-setup.sql):
 // admin edits everything, a player edits only their own profile, anyone else sees nothing.
 // The anon key is meant to be public.
-const CLOUD = { url: 'https://vvnwwsrvoxvofywvakzh.supabase.co', key: 'sb_publishable_1FLnhaoJHhgyqi40rz9etw_xpRqQLIo' };
+const CLOUD = window.POKER_CONFIG || { url: '', key: '' };  // local or production project, see config.js
 const CLOUD_ON = !!(CLOUD.url && CLOUD.key) && location.protocol.startsWith('http') && !!window.supabase;
 const sb = CLOUD_ON ? window.supabase.createClient(CLOUD.url, CLOUD.key) : null;
 let session = null, role = 'none', canEdit = false, myProfileId = null;
@@ -1109,6 +1111,7 @@ async function cloudPush() {
 }
 function loginMsg(m) { $('login-msg').innerHTML = m; }
 if (CLOUD_ON) {
+  $('play-link').classList.remove('hidden');
   showScreen('login');
   $('login-form').addEventListener('submit', async e => {
     e.preventDefault(); loginMsg('Signing in…');

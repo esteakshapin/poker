@@ -3,3 +3,9 @@ poker-data.json
 *.crswap
 .claude/
 .DS_Store
+
+node_modules/
+supabase/.temp/
+supabase/.branches/
+.env*
+supabase/local-users.json

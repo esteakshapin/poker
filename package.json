@@ -1,0 +1,24 @@
+{
+  "name": "poker",
+  "version": "1.0.0",
+  "description": "Home game poker tracker and online table",
+  "scripts": {
+    "db": "supabase start",
+    "db:stop": "supabase stop",
+    "db:reset": "supabase db reset",
+    "functions": "supabase functions serve",
+    "web": "python3 -m http.server 3000 --bind 127.0.0.1",
+    "seed": "node scripts/seed-local.mjs",
+    "test": "node --test test/",
+    "sim": "node scripts/simulate.mjs",
+    "bots": "node scripts/bots.mjs",
+    "dev": "supabase start && (supabase functions serve & python3 -m http.server 3000 --bind 127.0.0.1)"
+  },
+  "devDependencies": {
+    "@supabase/supabase-js": "^2.109.0",
+    "supabase": "^2.119.0",
+    "ws": "^8.22.0"
+  },
+  "private": true,
+  "type": "module"
+}

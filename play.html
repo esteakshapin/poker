@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Home Game Poker</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="config.js"></script>
+<link rel="stylesheet" href="play.css">
+</head>
+<body>
+<header>
+  <div class="row" style="justify-content:space-between">
+    <h1>Home Game Poker <span class="pill" id="env-pill"></span></h1>
+    <div class="row muted" id="whoami"></div>
+  </div>
+  <nav id="nav">
+    <a href="#lobby">Tables</a>
+    <a href="#stats">Stats</a>
+    <a href="#fair">Is it fair?</a>
+    <a href="index.html">← Tracker</a>
+  </nav>
+</header>
+<main id="view"></main>
+<script type="module" src="play.js"></script>
+</body>
+</html>
