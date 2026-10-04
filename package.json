@@ -12,7 +12,8 @@
     "test": "node --test test/",
     "sim": "node scripts/simulate.mjs",
     "bots": "node scripts/bots.mjs",
-    "dev": "supabase start && (supabase functions serve & python3 -m http.server 3000 --bind 127.0.0.1)"
+    "dev": "supabase start && (supabase functions serve & python3 -m http.server 3000 --bind 127.0.0.1)",
+    "setup-sql": "node scripts/make-setup-sql.mjs"
   },
   "devDependencies": {
     "@supabase/supabase-js": "^2.109.0",

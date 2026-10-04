@@ -4,7 +4,8 @@ A single-page tracker for home poker tournaments: players, buy-ins, sessions, ch
 
 - Open `index.html` directly to use it offline (data stays in that browser, optionally auto-saved to a file).
 - Hosted on GitHub Pages with shared data in Supabase: anyone with the link can view; sign-in via Supabase Auth: the admin edits everything, players edit their own profile.
-  One-time database setup is in `supabase-setup.sql`.
+  Database setup: put your admin email in `.env` (see `.env.example`), run `npm run setup-sql`,
+  and paste the generated `supabase-setup.local.sql` into the Supabase SQL Editor.
 
 ## Online poker (test feature)
 
@@ -26,5 +27,8 @@ one whenever the page is opened from `localhost`/`127.0.0.1`, so only the data d
     npm run db:reset     # wipe the local database (then run seed again)
     npm run db:stop      # stop the Docker containers
 
-Database changes live in `supabase/migrations/`. Production gets them by running the new migration
-file in the Supabase SQL Editor (and `supabase functions deploy game` for the server function).
+Database changes live in `supabase/migrations/` and are safe to commit: nothing personal is in them.
+Your admin email lives only in `.env` (git-ignored). `npm run setup-sql` combines the migrations and
+that email into `supabase-setup.local.sql` (also git-ignored) for the Supabase SQL Editor; it is safe
+to run again after adding a migration. The server function is deployed with
+`npx supabase functions deploy game`.
