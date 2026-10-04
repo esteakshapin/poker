@@ -128,19 +128,26 @@ async function tableView(tableId) {
   let S = null, version = -1, mine = { handId: null, cards: null }, busy = false, error = '', raiseTo = null, dead = false;
   const flags = { seedFor: 0, startTry: 0, timeoutTry: 0, firstHandAsked: false };
 
-  view.innerHTML = `
-    <div class="row" style="justify-content:space-between;margin-bottom:6px">
-      <h2 style="margin:0">${esc(info.name)} <span class="muted" style="font-weight:400">· blinds ${info.config.smallBlind}/${info.config.bigBlind}${info.tournament_id ? ' · tournament table' : ' · practice chips'}</span></h2>
-      <div class="row"><a href="#hands/${tableId}">Hand history</a><a href="#stats/${tableId}">Stats</a><span id="admin-btns"></span></div>
+  document.body.classList.add('in-table');
+  view.innerHTML = `<div class="tv">
+    <div class="tv-top">
+      <a href="#lobby">‹ Tables</a>
+      <div class="tv-title"><b>${esc(info.name)}</b><span>Blinds ${info.config.smallBlind}/${info.config.bigBlind} · ${info.tournament_id ? 'tournament table' : 'practice chips'}</span></div>
+      <span id="admin-btns"></span>
+      <button class="ghost" id="tv-info" title="Hand log, fairness and stacks">☰</button>
+      <button class="ghost" id="tv-full" title="Full screen">⛶</button>
     </div>
-    <div class="felt-wrap" id="felt"></div>
-    <div class="err" id="t-err" style="text-align:center"></div>
+    <div class="stage" id="felt"></div>
+    <div class="err" id="t-err"></div>
     <div class="controls" id="controls"></div>
-    <div class="cols">
-      <div class="card-box"><h2>This hand</h2><div class="log" id="log"></div></div>
-      <div class="card-box"><h2>Fairness</h2><div id="fairbox" class="note"></div></div>
-    </div>
-    <div class="card-box"><h2>Stacks this session</h2><div id="stack-chart"></div></div>`;
+    <aside class="drawer hidden" id="drawer">
+      <div class="row" style="justify-content:space-between"><b>Table info</b><button class="ghost" id="drawer-close">Close</button></div>
+      <div class="row" style="margin-top:8px"><a href="#hands/${tableId}">Hand history</a><a href="#stats/${tableId}">Stats</a></div>
+      <h2>This hand</h2><div class="log" id="log"></div>
+      <h2>Fairness</h2><div id="fairbox" class="note"></div>
+      <h2>Stacks this session</h2><div id="stack-chart"></div>
+    </aside></div>`;
+  if (!document.documentElement.requestFullscreen) $('tv-full').classList.add('hidden');
 
   const mySeat = () => S.seats.findIndex(s => s && s.profileId === me);
   const live = () => S.hand && S.hand.street !== 'done';
@@ -171,54 +178,117 @@ async function tableView(tableId) {
     finally { busy = false; render(); }
   }
 
+  // ----- animation bookkeeping -----
+  // The table is redrawn from scratch on every update. Each animated thing has a key and we remember
+  // when it first appeared, so a redraw continues its animation where it was instead of restarting it.
+  const born = new Map();
+  let firstPaint = true, bornHand = null;
+  function anim(key, name, dur, delay = 0) {
+    const now = performance.now();
+    if (!born.has(key)) born.set(key, { t: firstPaint ? -1e9 : now, delay }); // things already on the table when you arrive don't animate
+    const b = born.get(key), elapsed = now - b.t;
+    if (elapsed > b.delay + dur) return '';
+    return `animation:${name} ${dur}ms cubic-bezier(.2,.8,.3,1) ${Math.round(b.delay - elapsed)}ms both;`;
+  }
+  const remaining = (key, dur) => { const b = born.get(key); return b ? Math.max(0, b.t + b.delay + dur - performance.now()) : 0; };
+
+  const DENOMS = [[1000, '#e0b84a'], [500, '#7b4bb3'], [100, '#262626'], [25, '#2e8b57'], [5, '#c0392b'], [1, '#f1f1f1']];
+  function chips(amount) {
+    let rest = amount; const cols = [];
+    for (const [d, color] of DENOMS) { const k = Math.floor(rest / d); if (k > 0) { cols.push(`<span class="chipcol">${`<i style="--c:${color}"></i>`.repeat(Math.min(k, 6))}</span>`); rest -= k * d; } }
+    return `<span class="chips">${cols.slice(0, 4).join('')}</span>`;
+  }
+  // A card that can flip: back while `style` holds it rotated, face when done.
+  const flipCard = (c, outer, inner, cls = '') => `<span class="pc3d" style="${outer}"><span class="in" style="${inner}">${cardHtml(c, cls)}<span class="pc back"></span></span></span>`;
+
   // ----- drawing -----
   function render() {
     if (!S || dead) return;
     const n = S.seats.length, seatIdx = mySeat(), rot = seatIdx >= 0 ? seatIdx : 0;
-    const h = S.hand, isLive = live(), narrow = view.clientWidth < 600;
-    const pos = (i, r = 1) => {
-      const a = Math.PI / 2 + ((i - rot + n) % n) * 2 * Math.PI / n;
-      return [50 + Math.cos(a) * (narrow ? 40 : 45) * r, 50 + Math.sin(a) * (narrow ? 44 : 41) * r];
-    };
-    let html = '<div class="felt"></div>';
+    const h = S.hand, isLive = live(), stage = $('felt'), hid = h?.id;
+    if (hid !== bornHand) { born.clear(); bornHand = hid; }
+    const portrait = stage.clientHeight > stage.clientWidth * 1.05;
+    const RX = portrait ? 37 : 41, RY = portrait ? 39 : 35, CY = portrait ? 47 : 46;
+    const at = (i, r = 1, da = 0) => { const a = Math.PI / 2 + ((i - rot + n) % n) * 2 * Math.PI / n + da; return [50 + Math.cos(a) * RX * r, CY + Math.sin(a) * RY * r]; };
+    const place = ([x, y]) => `left:${x.toFixed(1)}%;top:${y.toFixed(1)}%;`;
+    const from = ([x, y], [fx, fy]) => `--dx:${(fx - x).toFixed(1)}cqw;--dy:${(fy - y).toFixed(1)}cqh;`; // offset to where it starts
+    const mid = [50, CY];
+    const verb = a => ({ fold: 'Fold', check: 'Check', call: `Call ${num(a.chips)}`, bet: `Bet ${num(a.to)}`, raise: `Raise ${num(a.to)}`, 'small blind': '', 'big blind': '' }[a.type]);
+    const lastAct = h?.actions.at(-1), nP = h?.players.length || 0;
+    const winners = h?.results ? new Map() : null;
+    if (winners) for (const pot of h.results.pots) for (const w of pot.winners) winners.set(w, (winners.get(w) || 0) + Math.floor(pot.amount / pot.winners.length));
+
+    let html = `<div class="felt ${portrait ? 'portrait' : ''}"></div>`;
     S.seats.forEach((s, i) => {
-      const [x, y] = pos(i);
+      const xy = at(i);
       if (!s) {
-        html += `<div class="seat empty" style="left:${x}%;top:${y}%">${seatIdx < 0 && S.status === 'open' && me ? `<button data-sit="${i}">Sit here</button>` : '<span class="muted" style="font-size:11px">Empty</span>'}</div>`;
+        html += `<div class="seat empty" style="${place(xy)}">${seatIdx < 0 && S.status === 'open' && me ? `<button data-sit="${i}">Sit</button>` : '<span>·</span>'}</div>`;
         return;
       }
-      const p = prof(s.profileId), pl = h && hp(s.profileId), isMe = s.profileId === me;
-      const inHand = pl && !pl.folded, turn = isLive && h.toAct === i;
+      const p = prof(s.profileId), k = h ? h.players.findIndex(x => x.profileId === s.profileId) : -1, pl = k >= 0 ? h.players[k] : null;
+      const isMe = s.profileId === me, turn = isLive && h.toAct === i, won = winners?.get(s.profileId) > 0 && pl.won > 0;
       let cards = '';
-      if (pl && (isLive || h.street === 'done')) {
-        const shown = pl.hole || (isMe ? mine.cards : null);
-        cards = shown ? cardsHtml(shown, pl.folded ? 'dim' : '') : inHand ? cardHtml(null) + cardHtml(null) : '';
+      if (pl) {
+        const fromMid = from(xy, mid);
+        const deal = c => anim(`deal:${hid}:${i}:${c}`, 'deal', 420, (c * nP + k) * 110) + fromMid;
+        const dealEnd = remaining(`deal:${hid}:${i}:1`, 420);
+        const faces = pl.hole || (isMe ? mine.cards : null);
+        if (pl.folded && !(isMe && faces)) {
+          const m = anim(`muck:${hid}:${i}`, 'muck', 450);
+          if (m) cards = [0, 1].map(() => `<span style="${m}${fromMid}">${cardHtml(null)}</span>`).join('');
+        } else if (faces) {
+          const flip = anim(`face:${hid}:${i}`, 'flipin', 380, born.has(`face:${hid}:${i}`) ? 0 : dealEnd);
+          cards = faces.map((c, j) => flipCard(c, deal(j), flip, pl.folded ? 'dim' : '')).join('');
+        } else cards = [0, 1].map(j => `<span style="${deal(j)}">${cardHtml(null)}</span>`).join('');
       }
       const status = !pl ? (s.sittingOut ? 'Sitting out' : s.stack === 0 ? 'Out of chips' : '')
-        : pl.folded ? 'Folded' : pl.allIn ? 'All-in' : h.street === 'done' && pl.won > 0 ? `<span class="pos">Won ${num(pl.won)}</span>` : (pl.handName || '');
-      html += `<div class="seat ${isMe ? 'me' : ''} ${turn ? 'turn' : ''} ${(pl && pl.folded) || (!pl && isLive) || s.sittingOut ? 'out' : ''}" style="left:${x}%;top:${y}%">
+        : pl.folded ? 'Folded' : pl.allIn ? 'All-in' : h.street === 'done' && pl.won > 0 ? `+${num(pl.won)}` : (pl.handName || '');
+      const bubble = lastAct && lastAct.seat === i && verb(lastAct) ? anim(`act:${hid}:${h.actions.length}`, 'bubble', 1700) : '';
+      html += `<div class="seat ${isMe ? 'me' : ''} ${turn ? 'turn' : ''} ${won ? 'winner' : ''} ${(pl && pl.folded) || (!pl && isLive) || s.sittingOut ? 'out' : ''}" style="${place(xy)}">
         <div class="cards">${cards}</div>
-        <div class="plate">${h && h.button === i && (isLive || h.street === 'done') ? '<span class="tag">D</span>' : ''}
-          <div class="nm">${avatar(p, 20)} ${esc(p.name)}</div>
+        ${bubble ? `<div class="bubble" style="${bubble}">${verb(lastAct)}${lastAct.allIn ? ' · all-in' : ''}</div>` : ''}
+        <div class="plate"><span class="ava">${avatar(p, 30)}</span>
+          <div class="nm">${esc(p.name)}</div>
           <div class="stack">${num(pl ? pl.stack : s.stack)}</div>
           <div class="status">${status}</div>
           ${turn ? '<div class="timer" data-timer></div>' : ''}
         </div></div>`;
-      if (pl && pl.bet > 0 && isLive) { const [bx, by] = pos(i, 0.58); html += `<div class="bet" style="left:${bx}%;top:${by}%">${num(pl.bet)}</div>`; }
+      if (pl && pl.bet > 0 && isLive) {
+        const b = at(i, 0.6);
+        html += `<div class="bet" style="${place(b)}${from(b, xy)}${anim(`bet:${hid}:${h.street}:${i}:${pl.bet}`, 'chipin', 320)}">${chips(pl.bet)}<b>${num(pl.bet)}</b></div>`;
+      }
+      if (won) { // the pot slides from the middle to the winner
+        html += `<div class="winpile" style="${place(xy)}${from(xy, mid)}${anim(`win:${hid}:${i}`, 'winfly', 1300, 600) || 'opacity:0;'}">${chips(winners.get(s.profileId))}<b>+${num(pl.won)}</b></div>`;
+      }
     });
+    // dealer and blind buttons
+    if (h) {
+      const mk = (cls, label, seat, da) => `<div class="mk ${cls}" style="${place(at(seat, 0.72, da))}${anim(`mk:${hid}:${cls}`, 'pop', 350)}" title="${label}">${cls === 'd' ? 'D' : cls.toUpperCase()}</div>`;
+      html += mk("d", "Dealer", h.button, 0.28);
+      if (S.seats[h.sb]) html += mk("sb", "Small blind", h.sb, -0.28);
+      if (S.seats[h.bb]) html += mk("bb", "Big blind", h.bb, -0.28);
+    }
     let msg = '';
     if (S.status === 'closed') msg = 'This table is closed.';
     else if (h && h.street === 'done') {
       const pots = h.results.pots.filter(p => p.contested || h.results.pots.length === 1);
       msg = pots.map(p => `${p.winners.map(w => esc(prof(w).name)).join(' & ')} ${p.winners.length > 1 ? 'split' : 'wins'} ${num(p.amount)}`).join(' · ');
     } else if (!isLive) msg = S.seats.filter(s => s && !s.sittingOut && s.stack > 0).length < 2 ? 'Waiting for players…' : S.handNo === 0 ? 'Ready when you are.' : 'Next hand starting…';
-    html += `<div class="center"><div class="board">${h ? cardsHtml(h.board) : ''}</div>
-      ${h ? `<div class="pot">Pot ${num(h.pot)}</div>` : ''}<div class="msg">${msg}</div></div>`;
-    $('felt').innerHTML = html;
+    let board = '';
+    if (h) {
+      const known = h.board.filter((_, i) => born.has(`board:${hid}:${i}`)).length;
+      board = h.board.map((c, i) => flipCard(c, '', anim(`board:${hid}:${i}`, 'flipin', 420, Math.max(0, i - known) * 140))).join('');
+    }
+    const inMiddle = h && isLive ? h.pot - h.players.reduce((a, p) => a + p.bet, 0) : 0;
+    html += `<div class="center" style="top:${CY}%"><div class="board">${board}</div>
+      ${h && isLive ? `<div class="pot" style="${anim(`pot:${hid}:${h.street}`, 'pulse', 400)}">${inMiddle > 0 ? chips(inMiddle) : ''}<span>Pot ${num(h.pot)}</span></div>` : ''}
+      <div class="msg">${msg}</div></div>`;
+    stage.innerHTML = html;
+    firstPaint = false;
     $('t-err').textContent = error;
     renderControls(seatIdx, isLive);
     renderLog(); renderFair();
-    $('admin-btns').innerHTML = isAdmin && S.status === 'open' ? `<button class="ghost danger" data-close ${isLive ? 'disabled title="Wait for the hand to finish"' : ''}>End session</button>` : '';
+    $('admin-btns').innerHTML = isAdmin && S.status === 'open' ? `<button class="ghost danger" data-close ${isLive ? 'disabled title="Wait for the hand to finish"' : ''}>End</button>` : '';
   }
 
   function renderControls(seatIdx, isLive) {
@@ -227,7 +297,7 @@ async function tableView(tableId) {
     if (!me) { el.innerHTML = '<span class="muted">Your login is not linked to a player profile, so you can watch but not play.</span>'; return; }
     if (seatIdx < 0) { el.innerHTML = '<span class="muted">Pick an empty seat to join.</span>'; return; }
     const seat = S.seats[seatIdx], pl = h && hp(me);
-    const side = `<button class="ghost" data-act="leave">Leave table</button>` + (seat.sittingOut
+    const side = `<button class="ghost" data-act="leave">Leave</button>` + (seat.sittingOut
       ? `<button class="btn" data-out="0">I'm back</button>` : `<button class="ghost" data-out="1">Sit out</button>`);
     if (isLive && h.toAct === seatIdx && pl) {
       const toCall = Math.min(h.currentBet - pl.bet, pl.stack), maxTo = pl.bet + pl.stack;
@@ -237,12 +307,12 @@ async function tableView(tableId) {
       if (raiseTo === null || raiseTo < minTo || raiseTo > maxTo) raiseTo = minTo;
       const presets = [['Min', minTo], ['½ pot', h.currentBet + Math.round((h.pot + toCall) / 2)], ['Pot', h.currentBet + h.pot + toCall], ['All-in', maxTo]]
         .map(([l, v]) => [l, Math.max(minTo, Math.min(maxTo, v))]);
-      el.innerHTML = `<button class="ghost danger" data-act="fold">Fold</button>
+      el.innerHTML = `${canRaise ? `<div class="raise-row">${presets.map(([l, v]) => `<button class="ghost" data-preset="${v}">${l}</button>`).join('')}
+          <input type="range" id="raise-range" min="${minTo}" max="${maxTo}" value="${raiseTo}">
+          <input type="number" id="raise-num" min="${minTo}" max="${maxTo}" value="${raiseTo}"></div>` : ''}
+        <button class="fold" data-act="fold">Fold</button>
         ${toCall === 0 ? '<button class="btn" data-act="check">Check</button>' : `<button class="btn" data-act="call">Call ${num(toCall)}</button>`}
-        ${canRaise ? `<input type="range" id="raise-range" min="${minTo}" max="${maxTo}" value="${raiseTo}">
-          <input type="number" id="raise-num" min="${minTo}" max="${maxTo}" value="${raiseTo}">
-          <button class="btn" data-act="raise" id="raise-btn">${h.currentBet === 0 ? 'Bet' : 'Raise to'} ${num(raiseTo)}</button>
-          ${presets.map(([l, v]) => `<button class="ghost" data-preset="${v}">${l}</button>`).join('')}` : ''}`;
+        ${canRaise ? `<button class="btn raise" data-act="raise" id="raise-btn">${h.currentBet === 0 ? 'Bet' : 'Raise to'} ${num(raiseTo)}</button>` : ''}`;
       return;
     }
     if (seat.stack === 0 && !(isLive && pl && !pl.folded)) { el.innerHTML = `<button class="btn" data-act="rebuy">Rebuy ${num(S.config.startingStack)} chips</button>${side}`; return; }
@@ -287,7 +357,10 @@ async function tableView(tableId) {
 
   // ----- clicks -----
   const onClick = e => {
-    const d = e.target.closest('button')?.dataset; if (!d) return;
+    const btn = e.target.closest('button'); if (!btn) return;
+    if (btn.id === 'tv-info' || btn.id === 'drawer-close') { $('drawer').classList.toggle('hidden'); if (btn.id === 'tv-info') loadChart(); return; }
+    if (btn.id === 'tv-full') { document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen().catch(() => {}); return; }
+    const d = btn.dataset;
     if (d.sit !== undefined) send('sit', { seat: +d.sit });
     else if (d.out !== undefined) send('sit_out', { out: d.out === '1' });
     else if (d.preset) { raiseTo = +d.preset; render(); }
@@ -343,7 +416,9 @@ async function tableView(tableId) {
     .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'game_public', filter: `table_id=eq.${tableId}` }, p => setState(p.new.state, p.new.version))
     .subscribe();
   const poll = setInterval(() => { if (!document.hidden) refresh().catch(() => {}); }, 2500); // safety net if live updates drop
-  cleanup = () => { dead = true; clearInterval(tick); clearInterval(poll); sb.removeChannel(channel); view.removeEventListener('click', onClick); view.removeEventListener('input', onInput); };
+  const onResize = () => render();
+  window.addEventListener('resize', onResize);
+  cleanup = () => { dead = true; document.body.classList.remove('in-table'); window.removeEventListener('resize', onResize); clearInterval(tick); clearInterval(poll); sb.removeChannel(channel); view.removeEventListener('click', onClick); view.removeEventListener('input', onInput); };
   await refresh();
 }
 
