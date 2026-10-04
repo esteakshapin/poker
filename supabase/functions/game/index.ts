@@ -85,7 +85,7 @@ async function afterMove(p: Priv): Promise<Step> {
   if (p.recorded === hand.id) return {};
   p.recorded = hand.id;
   p.deadline = null;
-  p.nextHandAt = Date.now() + (hand.results.endedBy === 'showdown' ? 7000 : 3500);
+  p.nextHandAt = Date.now() + (hand.results.endedBy === 'showdown' ? 9000 : 5000);
   p.next = await freshCommitment();   // commit to the NEXT hand's seed now, before players send theirs
   p.seeds = {};
   p.current = { commitment: p.current.commitment };
