@@ -59,7 +59,7 @@ export function bestHand(cards) {
 // Each player's chance of having the best hand once the board is complete (ties count as a share).
 // holes: [[c, c], ...] for the players still in; board: cards already out; dead: other cards known to be gone.
 // Up to two cards to come it checks every possible board exactly. Before the flop there are 1.7 million
-// boards, so it samples 4,000 of them with a fixed pseudo-random sequence (same cards, same answer everywhere).
+// boards, so it samples 1,500 of them with a fixed pseudo-random sequence (same cards, same answer everywhere).
 export function equities(holes, board, dead = []) {
   const known = new Set([...holes.flat(), ...board, ...dead]);
   const rest = FRESH_DECK.filter(c => !known.has(c)), need = 5 - board.length, wins = holes.map(() => 0);
@@ -77,7 +77,7 @@ export function equities(holes, board, dead = []) {
   else {
     let seed = [...known].join('').split('').reduce((a, ch) => (a * 31 + ch.charCodeAt(0)) >>> 0, 7);
     const rnd = n => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return Math.floor(seed / 4294967296 * n); };
-    for (let s = 0; s < 4000; s++) {
+    for (let s = 0; s < 1500; s++) {
       const pick = [...rest];
       for (let i = 0; i < need; i++) { const j = i + rnd(pick.length - i); [pick[i], pick[j]] = [pick[j], pick[i]]; }
       score([...board, ...pick.slice(0, need)]);

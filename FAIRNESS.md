@@ -76,7 +76,7 @@ second board from the deck in the same way as the first.
 
 The win chances and "outs" shown during an all-in are worked out from the face-up cards only. With
 one or two cards to come every possible board is counted exactly. Before the flop there are too many
-boards, so 4,000 of them are sampled, which is accurate to within a percent or two.
+boards, so 1,500 of them are sampled, which is accurate to within two or three percent.
 
 ### 5. The reveal
 
