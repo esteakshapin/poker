@@ -187,13 +187,13 @@ async function tableView(tableId) {
   const SPEED = 2.3; // one knob for all animation timing: bigger is slower
   const born = new Map();
   let firstPaint = true, bornHand = null;
-  function anim(key, name, dur, delay = 0) {
-    dur *= SPEED; delay *= SPEED;
+  function anim(key, name, dur, delay = 0, real = false) { // real = exact milliseconds, not scaled by SPEED
+    if (!real) { dur *= SPEED; delay *= SPEED; }
     const now = performance.now();
     if (!born.has(key)) born.set(key, { t: firstPaint ? -1e9 : now, delay }); // things already on the table when you arrive don't animate
     const b = born.get(key), elapsed = now - b.t;
     if (elapsed > b.delay + dur) return '';
-    return `animation:${name} ${Math.round(dur)}ms cubic-bezier(.25,.8,.3,1) ${Math.round(b.delay - elapsed)}ms both;`;
+    return `animation:${name} ${Math.round(dur)}ms ${real ? 'ease-in-out' : 'cubic-bezier(.25,.8,.3,1)'} ${Math.round(b.delay - elapsed)}ms both;`;
   }
   const remaining = (key, dur) => { const b = born.get(key); return b ? Math.max(0, b.t + b.delay + dur * SPEED - performance.now()) / SPEED : 0; };
 
@@ -231,7 +231,8 @@ async function tableView(tableId) {
 
   // ----- all-in runout pacing -----
   // The server deals the whole all-in board at once; the table then shows it street by street.
-  const RUN_FIRST_MS = 1500, RUN_STREET_MS = 4200, RUN_END_MS = 2800; // RUN_STREET_MS matches the server's pause
+  const RUN_FIRST_MS = 1200, RUN_STREET_MS = 5200, RUN_END_MS = 3600;
+  const RUN_FLOP_ANIM = 2100, RUN_CARD_ANIM = 1650; // how long until a dealt flop / single card is face up // RUN_STREET_MS matches the server's pause
   let runTimers = [], runScheduled = null;
   function runoutView(h) {
     const ro = h.runout, key = `runout:${h.id}`;
@@ -242,10 +243,13 @@ async function tableView(tableId) {
     const done = el >= RUN_FIRST_MS + (events.length - 1) * RUN_STREET_MS + RUN_END_MS;
     const lens = ro.runs.map((_, run) => events.slice(0, count).filter(e => e.run === run).at(-1)?.len ?? ro.from);
     const run = count ? events[count - 1].run : 0;
-    const stage = ro.runs[run].stages.find(st => st.len === lens[run]);
+    // Odds and outs change only once the new card(s) have actually been turned over.
+    const landed = events.filter((e, i) => el >= RUN_FIRST_MS + i * RUN_STREET_MS + (e.len === 3 ? RUN_FLOP_ANIM : RUN_CARD_ANIM));
+    const seenRun = landed.length ? landed.at(-1).run : 0, seenLen = landed.filter(e => e.run === seenRun).at(-1)?.len ?? ro.from;
+    const stage = ro.runs[seenRun].stages.find(st => st.len === seenLen);
     if (runScheduled !== h.id && !done) { // redraw at each reveal
       runScheduled = h.id; runTimers.forEach(clearTimeout);
-      const times = [...events.map((_, i) => RUN_FIRST_MS + i * RUN_STREET_MS), RUN_FIRST_MS + (events.length - 1) * RUN_STREET_MS + RUN_END_MS];
+      const times = [...events.flatMap((e, i) => [RUN_FIRST_MS + i * RUN_STREET_MS, RUN_FIRST_MS + i * RUN_STREET_MS + (e.len === 3 ? RUN_FLOP_ANIM : RUN_CARD_ANIM)]), RUN_FIRST_MS + (events.length - 1) * RUN_STREET_MS + RUN_END_MS];
       runTimers = times.filter(t => t > el).map(t => setTimeout(render, t - el + 40));
     }
     return { done, lens, run, stage, times: ro.times, started: ro.runs.map((_, r) => r === 0 || events.slice(0, count).some(e => e.run === r)) };
@@ -272,6 +276,8 @@ async function tableView(tableId) {
       for (let y = CY - RY * 0.55; y <= CY + RY * 0.25; y += 1) { const gap = Math.min(...rows.map(r => Math.abs(r - y)), 99); if (gap > best) { best = gap; boardY = y; } }
     }
     const mid = [50, boardY];
+    // Board geometry in "em" of the board's font size: card, gaps, and how far left of centre the deck sits.
+    const CW = 2.5, CH = 3.5, GAP = 0.3, DGAP = 1.1, DECK_X = ((CW + DGAP + 5 * CW + 4 * GAP) / 2 - CW / 2).toFixed(2);
     const verb = a => ({ fold: 'fold', check: 'check', call: `call ${num(a.chips)}`, bet: `bet ${num(a.to)}`, raise: `raise ${num(a.to)}`, 'small blind': '', 'big blind': '' }[a.type]);
     const lastAct = h?.actions.at(-1), nP = h?.players.length || 0;
     const ro = h?.runout ? runoutView(h) : null;
@@ -293,7 +299,7 @@ async function tableView(tableId) {
       const isMe = s.profileId === me, turn = isLive && h.toAct === i, won = winners?.get(s.profileId) > 0 && pl.won > 0;
       let cards = '', tag = '';
       if (pl) {
-        const fromMid = from(xy, mid);
+        const fromMid = `--dx:calc(${(50 - xy[0]).toFixed(1)}cqw - ${DECK_X}*var(--bfs));--dy:${(boardY - xy[1]).toFixed(1)}cqh;`; // from the deck
         const deal = c => anim(`deal:${hid}:${i}:${c}`, 'deal', 450, (c * nP + k) * 130) + fromMid;
         const dealEnd = remaining(`deal:${hid}:${i}:1`, 450);
         const faces = pl.hole || (isMe ? mine.cards : null);
@@ -347,24 +353,36 @@ async function tableView(tableId) {
       const top = h.players.filter(p => p.hole && p.won > 0 && winners.get(p.profileId) > 0);
       if (top.length) winning = new Set(top.flatMap(p => bestHand([...p.hole, ...h.board]).cards));
     }
-    // The board. The flop arrives as a face-down stack, turns over, then spreads out to the right.
-    let board = '';
-    if (h) {
-      const rows = ro ? h.runout.runs.map((r, ri) => ro.started[ri] ? r.board.slice(0, ro.lens[ri]) : null) : [h.board];
-      board = rows.map((cards, ri) => {
-        if (!cards) return '';
-        const key = i => `board:${hid}:${ri}:${i}`, known = cards.filter((_, i) => born.has(key(i))).length;
-        const shared = ri > 0 ? h.runout.from : 0; // run 2 repeats the cards that were already out, faded
-        const row = cards.map((c, i) => {
-          const flop = i < 3 && known < 3 && cards.length >= 3 && i >= shared;
-          const outer = flop ? `--sx:${-i * 2.7}em;` + anim(`spread:${hid}:${ri}:${i}`, 'spread', 420, 620) : '';
-          return flipCard(c, outer, i < shared ? '' : anim(key(i), 'flipin', 450, flop ? 0 : Math.max(0, i - Math.max(known, 3)) * 200), (winning && !winning.has(c)) || i < shared ? 'faded' : '');
-        }).join('');
-        return `<div class="brow">${rows.length > 1 ? `<span class="rlabel">${ri + 1}</span>` : ''}${row}</div>`;
-      }).join('');
+    // The board: deck and burn pile on the left, then five fixed slots. Every card is dealt like at a real
+    // table: burn one (deck -> burn pile), slide the card(s) face down to the board, turn over, and for the
+    // flop spread the three out. Run it twice: cards that were already out sit in the middle, and each
+    // remaining slot splits into a top card (first run) and a bottom card (second run).
+    const T = { burn: 500, go: 600, gap: 200, move: 450, flipFlop: 1550, flipOne: 1150, flip: 500, spread: 2100 }; // real ms
+    const twoRows = !!h?.runout && h.runout.times === 2, split = twoRows ? h.runout.from : 5;
+    const rowCards = !h ? [[]] : ro ? h.runout.runs.map((r, ri) => r.board.slice(0, ro.started[ri] ? ro.lens[ri] : Math.min(ro.lens[ri], h.runout.from))) : [h.board];
+    const burns = []; let burnt = 0;
+    const cardAt = (ri, col, rowY) => {
+      const c = rowCards[ri]?.[col]; if (!c) return '';
+      const key = `board:${hid}:${ri}:${col}`, flop = col < 3, street = flop ? 0 : col - 2;
+      if (!flop || col === 0) { // one burn per street
+        const bk = `burn:${hid}:${ri}:${street}`, fresh = !born.has(bk), ba = anim(bk, 'burn', T.burn, 0, true);
+        if (ba) burns.push(`<span class="burncard" style="--by:${-(CH + GAP)}em;${ba}">${cardHtml(null)}</span>`); else burnt++;
+        if (fresh && firstPaint) burnt = Math.max(burnt, 1);
+      }
+      const mv = `--dx:${-((flop ? 0 : col) * (CW + GAP) + CW + DGAP).toFixed(2)}em;--dy:${(-rowY).toFixed(2)}em;` + anim(`mv:${key}`, 'fromdeck', T.move, T.go + (flop ? col * T.gap : 0), true);
+      const sp = flop && col ? `--sx:${(-col * (CW + GAP)).toFixed(2)}em;` + anim(`sp:${key}`, 'spread', T.move, T.spread, true) : '';
+      const flip = anim(key, 'flipin', T.flip, flop ? T.flipFlop : T.flipOne, true);
+      return `<span class="mv" style="${mv}"><span class="sp" style="${sp}">${flipCard(c, '', flip, winning && !winning.has(c) ? 'faded' : '')}</span></span>`;
+    };
+    let slots = '';
+    for (let col = 0; col < 5; col++) {
+      if (col < split) slots += `<div class="slot ${twoRows ? 'span' : ''}" style="grid-column:${col + 1}">${cardAt(0, col, 0)}</div>`;
+      else for (const ri of [0, 1]) slots += `<div class="slot" style="grid-column:${col + 1};grid-row:${ri + 1}">${cardAt(ri, col, (ri ? 1 : -1) * (CH + GAP) / 2)}</div>`;
     }
+    const board = `<div class="deckbox"><div class="slot discard">${burnt ? cardHtml(null) : ''}</div><div class="deck">${cardHtml(null)}</div>${burns.join('')}</div>
+      <div class="slots ${twoRows ? 'two' : ''}">${slots}</div>`;
     const inMiddle = h && (isLive || revealing) ? h.pot - h.players.reduce((a, p) => a + (isLive ? p.bet : 0), 0) : 0;
-    html += `<div class="center ${ro?.times === 2 ? 'two' : ''}" style="top:${boardY.toFixed(1)}%">
+    html += `<div class="center ${twoRows ? 'two' : ''} ${portrait ? 'portrait' : ''}" style="top:${boardY.toFixed(1)}%">
       ${h && (isLive || revealing) ? `<div class="pot" style="${anim(`pot:${hid}:${h.street}`, 'pulse', 350)}">${inMiddle > 0 ? chips(inMiddle, 4, 5) : ''}<span class="amt">${num(inMiddle)}</span>${inMiddle !== h.pot ? `<span class="total">total ${num(h.pot)}</span>` : ''}</div>` : ''}
       <div class="board">${board}</div><div class="msg">${msg}</div></div>`;
     stage.innerHTML = html;

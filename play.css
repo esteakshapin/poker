@@ -72,17 +72,36 @@ body.in-table { overflow: hidden; background: #262626; }
 .tv button.ghost { color: #e6e6e6; border: 2px solid #555; background: #2d2d2d; padding: 5px 10px; border-radius: 6px; font-weight: 700; font-size: 13px; text-transform: uppercase; white-space: nowrap; }
 .tv button.ghost.on { border-color: #37c978; color: #37c978; }
 .tv button.ghost.danger { color: #ff6a55; border-color: #ff6a55; }
-.stage { flex: 1; min-height: 0; position: relative; container-type: size; --sw: clamp(118px, 25cqmin, 205px); }
+.stage { flex: 1; min-height: 0; position: relative; container-type: size; --sw: clamp(118px, 25cqmin, 205px); --bfs: clamp(12px, 3.7cqmin, 28px); }
 .felt { position: absolute; inset: 9% 11% 15%; border-radius: 50%;
   background: radial-gradient(ellipse at 50% 42%, #4aa765 0%, #2f8f52 55%, #1f7a43 100%);
   border: clamp(8px, 2.2cqmin, 16px) solid #1b1b1b; box-shadow: 0 14px 0 -2px #151515, 0 26px 40px rgba(0,0,0,.6), inset 0 0 50px rgba(0,0,0,.25); }
 .felt.portrait { inset: 7% 12% 12%; border-radius: 22% / 12%; }
 .center { position: absolute; left: 50%; transform: translate(-50%, -50%); text-align: center; color: #fff; width: 76%; pointer-events: none; z-index: 2; }
-.center .board { font-size: clamp(13px, 4.2cqmin, 30px); min-height: 3.6em; perspective: 700px; white-space: nowrap; }
-.center .pot { margin-bottom: .7em; font-weight: 800; display: inline-flex; gap: 10px; align-items: flex-end; position: relative;
+.center .board { font-size: var(--bfs); perspective: 900px; white-space: nowrap; display: flex; align-items: center; justify-content: center; gap: 1.1em; }
+/* deck, burn pile and the five card slots */
+.deckbox { position: relative; width: 2.5em; height: 3.5em; flex: none; }
+.deckbox .pc { margin: 0; position: absolute; left: 0; top: 0; }
+.deck .pc { box-shadow: 1px 1px 0 #b9534c, 2px 2px 0 #fff, 3px 3px 0 #b9534c, 4px 4px 0 #fff, 5px 6px 6px rgba(0,0,0,.45); }
+.slot { position: relative; width: 2.5em; height: 3.5em; border-radius: .3em; box-shadow: inset 0 0 0 2px rgba(255,255,255,.2); }
+.slot.discard { position: absolute; left: 0; bottom: calc(100% + .3em); box-shadow: inset 0 0 0 2px rgba(255,255,255,.1); }
+.slot.discard .pc { rotate: -8deg; }
+.burncard { position: absolute; left: 0; top: 0; z-index: 3; }
+.slots { display: grid; grid-template-columns: repeat(5, 2.5em); grid-auto-rows: 3.5em; gap: .3em; }
+.slots.two { grid-template-rows: 3.5em 3.5em; }
+.slot.span { grid-row: 1 / span 2; align-self: center; }
+.slot .mv, .slot .sp { position: absolute; inset: 0; display: block; }
+.slot .pc3d { margin: 0; display: block; } .slot .pc3d .in { display: block; } .slot .pc { margin: 0; }
+@keyframes fromdeck { from { translate: var(--dx) var(--dy); } to { translate: 0 0; } }
+@keyframes burn { from { translate: 0 0; rotate: 0deg; } to { translate: 0 var(--by); rotate: -8deg; } }
+.center .pot { margin-bottom: .9em; font-weight: 800; display: inline-flex; gap: 10px; align-items: flex-end; position: relative;
   background: rgba(0,0,0,.22); padding: 4px 22px; border-radius: 999px; min-width: 7em; justify-content: center; }
 .center .pot .amt { font-size: clamp(16px, 3.4cqmin, 26px); }
 .center .pot .total { position: absolute; right: -6px; top: -10px; background: #2b6e41; border-radius: 999px; padding: 0 8px; font-size: clamp(10px, 1.9cqmin, 13px); font-weight: 700; }
+/* on a phone the pot goes under the board, clear of the bets coming in from the top seats */
+.center.portrait { display: flex; flex-direction: column; align-items: center; }
+.center.portrait .pot { order: 2; margin: .7em 0 0; }
+.center.portrait .msg { order: 3; }
 .center .msg { font-size: clamp(12px, 2.4cqmin, 16px); margin-top: 8px; text-shadow: 0 1px 2px #000; font-weight: 700; }
 
 /* seats: cards on the left, name plate on the right (clamped so they never leave the screen) */
@@ -141,7 +160,7 @@ body.in-table { overflow: hidden; background: #262626; }
 .seat .outs b { margin-right: 5px; font-weight: 800; color: #f6e04d; }
 .pc.tiny { font-size: .62em; margin: 0 1px; box-shadow: none; }
 .brow { position: relative; display: block; margin: .12em 0; }
-.center.two .board { font-size: clamp(11px, 3.2cqmin, 23px); }
+.center.two .board { font-size: calc(var(--bfs) * .82); }
 .rlabel { position: absolute; left: 50%; margin-left: -8.4em; top: 50%; translate: 0 -50%; width: 1.5em; height: 1.5em; border-radius: 50%; background: rgba(0,0,0,.4); color: #fff; font-size: .55em; font-weight: 800; display: flex; align-items: center; justify-content: center; }
 @keyframes spread { from { translate: var(--sx) 0; } to { translate: 0 0; } }
 

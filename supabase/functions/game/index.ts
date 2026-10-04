@@ -34,7 +34,7 @@ async function whoIs(req: Request): Promise<Caller> {
 }
 
 const RUNOUT_CHOICE_MS = 12000;  // time to choose once / twice
-const RUNOUT_STREET_MS = 4200;   // screen time per street of an all-in board (the table screen uses the same pacing)
+const RUNOUT_STREET_MS = 5200;   // screen time per street of an all-in board (the table screen uses the same pacing)
 
 // ---------- seeds ----------
 async function freshCommitment() {
