@@ -161,7 +161,7 @@ test('public view never contains the deck or unshown hole cards mid-hand', () =>
   assert.ok(pub.hand.players.every(p => p.hole === null));
 });
 
-test('all-in: cards go face up, players choose, run it twice splits the pot by board', () => {
+test('all-in: players choose once/twice blind, then cards go face up; run it twice splits the pot by board', () => {
   const t = table([100, 100]);
   // heads-up deal order: seat 1 (big blind) first, then seat 0 (button). p1 has aces, p0 has kings.
   const used = ['As', 'Ad', 'Ks', 'Kd', '2c', '7d', '9h', '3s', '4c', 'Kh', '5d', '6c'];
@@ -173,12 +173,15 @@ test('all-in: cards go face up, players choose, run it twice splits the pot by b
   E.act(t, 'p1', { type: 'bet', amount: 98 }); E.act(t, 'p0', { type: 'call' }); // all-in on the flop
   const h = t.hand;
   assert.ok(h.awaiting && h.toAct === null && h.street === 'flop');
-  assert.equal(E.publicView(t).hand.players.filter(p => p.hole).length, 2);     // both hands face up
-  assert.ok(h.awaiting.equity.p1 > 0.85 && Math.abs(h.awaiting.equity.p0 + h.awaiting.equity.p1 - 1) < 1e-9);
+  const during = E.publicView(t).hand;                                           // while choosing: no cards, no odds
+  assert.equal(during.players.filter(p => p.hole).length, 0);
+  assert.equal(JSON.stringify(during.awaiting), JSON.stringify({ from: 3, votes: {} }));
   E.voteRunout(t, 'p0', 2);
   assert.ok(t.hand.awaiting);                                                    // needs both to agree
   E.voteRunout(t, 'p1', 2);
   assert.equal(h.street, 'done');
+  assert.equal(E.publicView(t).hand.players.filter(p => p.hole).length, 2);     // now both hands are face up
+  assert.ok(h.runout.runs[0].stages[0].equity.p1 > 0.85);                        // and the odds at the moment of the all-in are known
   assert.deepEqual(h.board, ['2c', '7d', '9h', '3s', '4c']);                     // run 1: aces hold
   assert.deepEqual(h.board2, ['2c', '7d', '9h', 'Kh', '5d']);                    // run 2: kings hit a set
   assert.deepEqual(t.seats.filter(Boolean).map(s => s.stack), [100, 100]);       // one board each

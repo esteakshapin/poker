@@ -283,10 +283,10 @@ function settle(state) {
     h.currentBet = 0; h.minRaise = state.config.bigBlind;
     if (h.street === 'river') return finish(state, 'showdown');
     if (alive.filter(canAct).length < 2) {
-      // Everyone is all-in (or one player has everyone covered): no more betting. Cards go face up
-      // and the players choose whether to run the rest of the board once or twice.
-      const eq = equities(alive.map(p => p.hole), h.board);
-      h.awaiting = { from: h.board.length, votes: {}, equity: Object.fromEntries(alive.map((p, i) => [p.profileId, eq[i]])) };
+      // Everyone is all-in (or one player has everyone covered): no more betting. The players choose
+      // whether to run the rest of the board once or twice BEFORE any hand is shown, so nobody can
+      // pick based on who is ahead. Cards go face up once the choice is made.
+      h.awaiting = { from: h.board.length, votes: {} };
       h.toAct = null;
       break;
     }
@@ -392,8 +392,8 @@ function finish(state, endedBy) {
 // What everyone may see. Hole cards appear only for players who reached showdown.
 export function publicView(state) {
   const h = state.hand;
-  // Cards are face up at showdown, and as soon as an all-in leaves nothing more to bet.
-  const shown = !h ? [] : h.awaiting ? h.players.filter(p => !p.folded).map(p => p.profileId) : h.results?.shown || [];
+  // Cards are face up at showdown. During an all-in they stay hidden until once / twice has been chosen.
+  const shown = h?.results?.shown || [];
   return {
     config: state.config, handNo: state.handNo, button: state.button,
     seats: state.seats.map(s => s && { profileId: s.profileId, stack: s.stack, sittingOut: s.sittingOut, bought: s.bought, carried: s.carried }),

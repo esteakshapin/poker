@@ -89,10 +89,11 @@ async function playSession({ tournamentId, revealMode, hands }) {
     while (S.hand.street !== 'done') {
       assert.ok(++steps < 200);
       if (S.hand.awaiting) { // all-in: hands are face up; everyone picks once or twice
-        assert.ok(S.hand.players.filter(p => !p.folded).every(p => p.hole), 'all-in hands are shown');
+        assert.ok(S.hand.players.every(p => p.hole === null) && !S.hand.awaiting.equity, 'no hands or odds are shown while choosing once / twice');
         const twice = rand(2) === 0; allIns++;
         for (const p of S.hand.players.filter(p => !p.folded)) if (S.hand.awaiting) S = (await byId[p.profileId].call('runout', { tableId, times: twice ? 2 : 1 })).state;
         assert.equal(S.hand.street, 'done'); assert.equal(S.hand.runout.times, twice ? 2 : 1);
+        assert.ok(S.hand.players.filter(p => !p.folded).every(p => p.hole), 'hands are shown once the choice is made');
         if (twice) ranTwice++;
         continue;
       }

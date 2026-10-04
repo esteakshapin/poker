@@ -64,10 +64,12 @@ So once the seeds are fixed, every card of the hand is fixed too, including card
 
 ### All-ins and "run it twice"
 
-When everyone left in a hand is all-in (or one player has the rest covered) there is no more betting,
-so the hands are turned face up and the table shows each player's chance to win. The players then
-choose whether to deal the rest of the board once or twice. It is only run twice if every player
-still in the hand agrees; if anyone picks once, or the choice times out, it is run once.
+When everyone left in a hand is all-in (or one player has the rest covered) there is no more betting.
+The players first choose whether to deal the rest of the board once or twice, while all hands are
+still face down and no odds are shown, so nobody can choose based on who is ahead. It is only run
+twice if every player still in the hand agrees; if anyone picks once, or the choice times out, it is
+run once. Then the hands are turned face up, the table shows each player's chance to win, and the
+board is dealt.
 
 Running it twice does not use any new randomness. The second board keeps the cards that were already
 out and takes its remaining cards from the same shuffled deck, straight after the first board, with a

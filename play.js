@@ -282,8 +282,7 @@ async function tableView(tableId) {
     const lastAct = h?.actions.at(-1), nP = h?.players.length || 0;
     const ro = h?.runout ? runoutView(h) : null;
     const revealing = !!ro && !ro.done;                 // all-in board still coming out
-    const allInShow = h?.awaiting || revealing;         // hands face up with their odds
-    const odds = h?.awaiting ? h.awaiting.equity : revealing ? ro.stage.equity : null;
+    const odds = revealing ? ro.stage.equity : null;    // win chances appear once once / twice is chosen and the hands are face up
     const boardNow = !h ? [] : ro ? h.runout.runs[ro.run].board.slice(0, ro.lens[ro.run]) : h.board;
     const winners = h?.results && !revealing ? new Map() : null;
     if (winners) for (const pot of h.results.pots) for (const w of pot.winners) winners.set(w, (winners.get(w) || 0) + Math.floor(pot.amount / pot.winners.length));
@@ -340,7 +339,7 @@ async function tableView(tableId) {
     });
     let msg = '';
     if (S.status === 'closed') msg = 'This table is closed.';
-    else if (h?.awaiting) msg = 'All in! Run it once or twice?';
+    else if (h?.awaiting) msg = 'All in! Once or twice? Hands are shown after everyone chooses.';
     else if (revealing) msg = ro.times === 2 ? `Running it twice · board ${ro.run + 1} of 2` : 'All in';
     else if (h && h.street === 'done') {
       const pots = h.results.pots.filter(p => p.contested || h.results.pots.length === 1);
