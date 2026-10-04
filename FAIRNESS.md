@@ -62,6 +62,22 @@ Cards come off the top of the shuffled deck in a fixed order:
 
 So once the seeds are fixed, every card of the hand is fixed too, including cards nobody has seen yet.
 
+### All-ins and "run it twice"
+
+When everyone left in a hand is all-in (or one player has the rest covered) there is no more betting,
+so the hands are turned face up and the table shows each player's chance to win. The players then
+choose whether to deal the rest of the board once or twice. It is only run twice if every player
+still in the hand agrees; if anyone picks once, or the choice times out, it is run once.
+
+Running it twice does not use any new randomness. The second board keeps the cards that were already
+out and takes its remaining cards from the same shuffled deck, straight after the first board, with a
+burn before each street. Each board plays for half of each pot. The verification re-derives the
+second board from the deck in the same way as the first.
+
+The win chances and "outs" shown during an all-in are worked out from the face-up cards only. With
+one or two cards to come every possible board is counted exactly. Before the flop there are too many
+boards, so 4,000 of them are sampled, which is accurate to within a percent or two.
+
 ### 5. The reveal
 
 The server seed is published when the session ends (the default) or after each hand, depending
@@ -113,5 +129,5 @@ or re-implement the formula above in any language; it is about 20 lines.
 | `supabase/functions/_shared/engine.js` | The rules of the game. No randomness in here; the deck is handed in. |
 | `supabase/functions/game/index.ts` | The server function: commits, collects seeds, deals, enforces turns. |
 | `supabase/migrations/20261004000000_game.sql` | Who may read what (your own cards only; no deck). |
-| `test/fair.test.mjs` | Tests: determinism, tamper detection, uniformity over 20,000 shuffles. |
+| `test/fair.test.mjs` | Tests: determinism, tamper detection (including the second board), uniformity over 20,000 shuffles. |
 | `scripts/simulate.mjs` | Plays full sessions against a local server and checks privacy, chip conservation and verification on every hand. |

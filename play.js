@@ -184,7 +184,7 @@ async function tableView(tableId) {
   // ----- animation bookkeeping -----
   // The table is redrawn from scratch on every update. Each animated thing has a key and we remember
   // when it first appeared, so a redraw continues its animation where it was instead of restarting it.
-  const SPEED = 1.8; // one knob for all animation timing: bigger is slower
+  const SPEED = 2.3; // one knob for all animation timing: bigger is slower
   const born = new Map();
   let firstPaint = true, bornHand = null;
   function anim(key, name, dur, delay = 0) {
@@ -229,6 +229,29 @@ async function tableView(tableId) {
   // What a player is holding right now, e.g. "Pair", "Straight".
   const strength = (hole, board) => hole.length + board.length >= 5 ? bestHand([...hole, ...board]).name : hole[0][0] === hole[1][0] ? 'Pair' : 'High card';
 
+  // ----- all-in runout pacing -----
+  // The server deals the whole all-in board at once; the table then shows it street by street.
+  const RUN_FIRST_MS = 1500, RUN_STREET_MS = 4200, RUN_END_MS = 2800; // RUN_STREET_MS matches the server's pause
+  let runTimers = [], runScheduled = null;
+  function runoutView(h) {
+    const ro = h.runout, key = `runout:${h.id}`;
+    if (!born.has(key)) born.set(key, { t: firstPaint ? -1e9 : performance.now(), delay: 0 });
+    const el = performance.now() - born.get(key).t;
+    const events = ro.runs.flatMap((r, run) => r.stages.slice(1).map(st => ({ run, len: st.len })));
+    const count = el < RUN_FIRST_MS ? 0 : Math.min(events.length, 1 + Math.floor((el - RUN_FIRST_MS) / RUN_STREET_MS));
+    const done = el >= RUN_FIRST_MS + (events.length - 1) * RUN_STREET_MS + RUN_END_MS;
+    const lens = ro.runs.map((_, run) => events.slice(0, count).filter(e => e.run === run).at(-1)?.len ?? ro.from);
+    const run = count ? events[count - 1].run : 0;
+    const stage = ro.runs[run].stages.find(st => st.len === lens[run]);
+    if (runScheduled !== h.id && !done) { // redraw at each reveal
+      runScheduled = h.id; runTimers.forEach(clearTimeout);
+      const times = [...events.map((_, i) => RUN_FIRST_MS + i * RUN_STREET_MS), RUN_FIRST_MS + (events.length - 1) * RUN_STREET_MS + RUN_END_MS];
+      runTimers = times.filter(t => t > el).map(t => setTimeout(render, t - el + 40));
+    }
+    return { done, lens, run, stage, times: ro.times, started: ro.runs.map((_, r) => r === 0 || events.slice(0, count).some(e => e.run === r)) };
+  }
+  const ALLIN = `<svg class="allin" viewBox="0 0 60 54"><path d="M30 3 57 50H3z" fill="#141414" stroke="#e23b2e" stroke-width="4" stroke-linejoin="round"/><path d="M30 14c5 6 9 8 9 12a4.4 4.4 0 0 1-7.6 3c.3 2 1 3.4 2.2 4.6h-7.2c1.200-1.200 1.900-2.600 2.200-4.600A4.400 4.400 0 0 1 21 26c0-4 4-6 9-12z" fill="#e23b2e"/><text x="30" y="46" text-anchor="middle" font-size="9.500" font-weight="900" fill="#fff" font-family="Arial, sans-serif">ALL IN</text></svg>`;
+
   // ----- drawing -----
   function render() {
     if (!S || dead) return;
@@ -251,7 +274,12 @@ async function tableView(tableId) {
     const mid = [50, boardY];
     const verb = a => ({ fold: 'fold', check: 'check', call: `call ${num(a.chips)}`, bet: `bet ${num(a.to)}`, raise: `raise ${num(a.to)}`, 'small blind': '', 'big blind': '' }[a.type]);
     const lastAct = h?.actions.at(-1), nP = h?.players.length || 0;
-    const winners = h?.results ? new Map() : null;
+    const ro = h?.runout ? runoutView(h) : null;
+    const revealing = !!ro && !ro.done;                 // all-in board still coming out
+    const allInShow = h?.awaiting || revealing;         // hands face up with their odds
+    const odds = h?.awaiting ? h.awaiting.equity : revealing ? ro.stage.equity : null;
+    const boardNow = !h ? [] : ro ? h.runout.runs[ro.run].board.slice(0, ro.lens[ro.run]) : h.board;
+    const winners = h?.results && !revealing ? new Map() : null;
     if (winners) for (const pot of h.results.pots) for (const w of pot.winners) winners.set(w, (winners.get(w) || 0) + Math.floor(pot.amount / pot.winners.length));
 
     let html = `<div class="felt ${portrait ? 'portrait' : ''}"></div>`;
@@ -275,21 +303,25 @@ async function tableView(tableId) {
         } else if (faces) {
           const flip = anim(`face:${hid}:${i}`, 'flipin', 400, born.has(`face:${hid}:${i}`) ? 0 : dealEnd);
           cards = faces.map((c, j) => `<span class="hc">${flipCard(c, deal(j), flip, pl.folded ? 'dim' : '')}</span>`).join('');
-          if (!pl.folded) tag = pl.handName || strength(faces, h.board);
+          if (!pl.folded) tag = winners ? [pl.handName, pl.handName2].filter(Boolean).join(' / ') || strength(faces, boardNow) : strength(faces, boardNow);
         } else cards = [0, 1].map(j => `<span class="hc" style="${deal(j)}">${cardHtml(null)}</span>`).join('');
       }
-      const stack = pl ? pl.stack : s.stack;
-      const status = !pl ? (s.sittingOut ? 'away' : s.stack === 0 ? 'out of chips' : '') : pl.folded ? 'folded' : pl.allIn ? 'all-in' : '';
+      const stack = pl ? pl.stack - (revealing ? pl.won : 0) : s.stack; // winnings arrive when the board is finished
+      const eq = odds && pl && !pl.folded ? odds[s.profileId] : null;
+      const myOuts = revealing && eq !== null && eq < 0.3 ? ro.stage.outs?.[s.profileId] : null;
+      const allIn = pl && pl.allIn && !pl.folded && (isLive || revealing);
+      const status = !pl ? (s.sittingOut ? 'away' : s.stack === 0 ? 'out of chips' : '') : pl.folded ? 'folded' : '';
       const say = lastAct && lastAct.seat === i && verb(lastAct) ? anim(`act:${hid}:${h.actions.length}`, 'bubble', 1400) : '';
       const badges = h && (isLive || h.street === 'done') ? [[h.button, 'd', 'D', 'Dealer'], [h.sb, 'sb', 'SB', 'Small blind'], [h.bb, 'bb', 'BB', 'Big blind']]
         .filter(([seat]) => seat === i).map(([, cls, label, title]) => `<span class="mk ${cls}" title="${title}" style="${anim(`mk:${hid}:${cls}`, 'pop', 300)}">${label}</span>`).join('') : '';
       html += `<div class="seat ${isMe ? 'me' : ''} ${xy[1] < CY - 4 ? 'top' : ''} ${turn ? 'turn' : ''} ${won ? 'winner' : ''} ${cards ? 'has-cards' : ''} ${(pl && pl.folded) || (!pl && isLive) || s.sittingOut ? 'out' : ''}" style="${seatAt(xy)}">
         ${say ? `<div class="bubble" style="${say}">${verb(lastAct)}${lastAct.allIn ? ' · all-in' : ''}</div>` : ''}
-        <div class="hcards">${cards}${tag ? `<span class="hs">${esc(tag)}</span>` : ''}</div>
+        <div class="hcards">${cards}${tag ? `<span class="hs">${esc(tag)}</span>` : ''}${eq !== null && eq !== undefined ? `<span class="eq ${eq >= 0.5 ? 'good' : 'bad'}" style="${anim(`eq:${hid}:${i}:${Math.round(eq * 100)}`, 'pop', 300)}">${Math.round(eq * 100)}%</span>` : ''}</div>
+        ${myOuts?.length ? `<div class="outs"><b>${myOuts.length} out${myOuts.length > 1 ? 's' : ''}</b>${myOuts.slice(0, 14).map(c => cardHtml(c, 'tiny')).join('')}</div>` : ''}
         <div class="plate">
-          <div class="front">${badges}${stack > 0 ? chips(stack, 4, 9, true) : ''}</div>
+          <div class="front">${badges}${allIn ? `<span style="${anim(`allin:${hid}:${i}`, 'pop', 350)}">${ALLIN}</span>` : stack > 0 ? chips(stack, 4, 9, true) : ''}</div>
           <div class="who">${avatar(p, 22)}<div><div class="nm">${esc(p.name)}</div>
-            <div class="stack">${num(stack)}${won ? ` <span class="plus">+${num(pl.won)}</span>` : ''}${status ? ` <span class="st">${status}</span>` : ''}</div></div></div>
+            <div class="stack">${allIn ? 'All In' : num(stack)}${won ? ` <span class="plus">+${num(pl.won)}</span>` : ''}${status ? ` <span class="st">${status}</span>` : ''}</div></div></div>
           ${turn ? '<div class="timer" data-timer></div>' : ''}
         </div></div>`;
       if (pl && pl.bet > 0 && isLive) {
@@ -302,24 +334,38 @@ async function tableView(tableId) {
     });
     let msg = '';
     if (S.status === 'closed') msg = 'This table is closed.';
+    else if (h?.awaiting) msg = 'All in! Run it once or twice?';
+    else if (revealing) msg = ro.times === 2 ? `Running it twice · board ${ro.run + 1} of 2` : 'All in';
     else if (h && h.street === 'done') {
       const pots = h.results.pots.filter(p => p.contested || h.results.pots.length === 1);
-      msg = pots.map(p => `${p.winners.map(w => esc(prof(w).name)).join(' & ')} ${p.winners.length > 1 ? 'split' : 'wins'} ${num(p.amount)}`).join(' · ');
+      const line = (who, amount) => `${who.map(w => esc(prof(w).name)).join(' & ')} ${who.length > 1 ? 'split' : 'wins'} ${num(amount)}`;
+      msg = pots.map(p => p.runs ? p.runs.map((r, i) => `Board ${i + 1}: ${line(r.winners, r.amount)}`).join(' · ') : line(p.winners, p.amount)).join(' · ');
     } else if (!isLive) msg = S.seats.filter(s => s && !s.sittingOut && s.stack > 0).length < 2 ? 'Waiting for players…' : S.handNo === 0 ? 'Ready when you are.' : 'Next hand starting…';
     // At showdown, light up the winning five cards and dim the rest.
     let winning = null;
-    if (h?.results?.endedBy === 'showdown') {
+    if (winners && h.results.endedBy === 'showdown' && !h.board2) {
       const top = h.players.filter(p => p.hole && p.won > 0 && winners.get(p.profileId) > 0);
       if (top.length) winning = new Set(top.flatMap(p => bestHand([...p.hole, ...h.board]).cards));
     }
+    // The board. The flop arrives as a face-down stack, turns over, then spreads out to the right.
     let board = '';
     if (h) {
-      const known = h.board.filter((_, i) => born.has(`board:${hid}:${i}`)).length;
-      board = h.board.map((c, i) => flipCard(c, '', anim(`board:${hid}:${i}`, 'flipin', 450, Math.max(0, i - known) * 180), winning && !winning.has(c) ? 'faded' : '')).join('');
+      const rows = ro ? h.runout.runs.map((r, ri) => ro.started[ri] ? r.board.slice(0, ro.lens[ri]) : null) : [h.board];
+      board = rows.map((cards, ri) => {
+        if (!cards) return '';
+        const key = i => `board:${hid}:${ri}:${i}`, known = cards.filter((_, i) => born.has(key(i))).length;
+        const shared = ri > 0 ? h.runout.from : 0; // run 2 repeats the cards that were already out, faded
+        const row = cards.map((c, i) => {
+          const flop = i < 3 && known < 3 && cards.length >= 3 && i >= shared;
+          const outer = flop ? `--sx:${-i * 2.7}em;` + anim(`spread:${hid}:${ri}:${i}`, 'spread', 420, 620) : '';
+          return flipCard(c, outer, i < shared ? '' : anim(key(i), 'flipin', 450, flop ? 0 : Math.max(0, i - Math.max(known, 3)) * 200), (winning && !winning.has(c)) || i < shared ? 'faded' : '');
+        }).join('');
+        return `<div class="brow">${rows.length > 1 ? `<span class="rlabel">${ri + 1}</span>` : ''}${row}</div>`;
+      }).join('');
     }
-    const inMiddle = h && isLive ? h.pot - h.players.reduce((a, p) => a + p.bet, 0) : 0;
-    html += `<div class="center" style="top:${boardY.toFixed(1)}%">
-      ${h && isLive ? `<div class="pot" style="${anim(`pot:${hid}:${h.street}`, 'pulse', 350)}">${inMiddle > 0 ? chips(inMiddle, 4, 5) : ''}<span class="amt">${num(inMiddle)}</span>${inMiddle !== h.pot ? `<span class="total">total ${num(h.pot)}</span>` : ''}</div>` : ''}
+    const inMiddle = h && (isLive || revealing) ? h.pot - h.players.reduce((a, p) => a + (isLive ? p.bet : 0), 0) : 0;
+    html += `<div class="center ${ro?.times === 2 ? 'two' : ''}" style="top:${boardY.toFixed(1)}%">
+      ${h && (isLive || revealing) ? `<div class="pot" style="${anim(`pot:${hid}:${h.street}`, 'pulse', 350)}">${inMiddle > 0 ? chips(inMiddle, 4, 5) : ''}<span class="amt">${num(inMiddle)}</span>${inMiddle !== h.pot ? `<span class="total">total ${num(h.pot)}</span>` : ''}</div>` : ''}
       <div class="board">${board}</div><div class="msg">${msg}</div></div>`;
     stage.innerHTML = html;
     firstPaint = false;
@@ -344,6 +390,15 @@ async function tableView(tableId) {
     if (S.status === 'closed') { el.innerHTML = `<a href="#hands/${tableId}">Review and verify the hands from this session</a>`; return; }
     if (!me) { el.innerHTML = '<span class="muted">Your login is not linked to a player profile, so you can watch but not play.</span>'; return; }
     if (!seat) { el.innerHTML = '<span class="muted">Pick an empty seat to join.</span>'; return; }
+    if (h?.runout && !runoutView(h).done) { el.innerHTML = '<span class="muted">All in. The board is being dealt…</span>'; return; }
+    if (h?.awaiting) {
+      const votes = h.awaiting.votes, mine = votes[me], inIt = pl && !pl.folded;
+      const said = Object.entries(votes).map(([id, t]) => `${esc(prof(id).name)}: ${t === 2 ? 'twice' : 'once'}`).join(' · ');
+      el.innerHTML = `<div class="turn-note">${inIt ? 'ALL IN · EVERYONE MUST AGREE TO RUN IT TWICE' : 'ALL IN'}</div>
+        ${inIt ? `<div class="actions"><button class="act ${mine === 1 ? 'armed' : ''}" data-run="1">RUN IT ONCE</button><button class="act go ${mine === 2 ? 'armed' : ''}" data-run="2">RUN IT TWICE</button></div>` : ''}
+        <span class="muted" style="align-self:flex-end">${said || 'Players are choosing…'}</span>`;
+      return;
+    }
     const o = myOptions();
     if (o) {
       if (preAction) { preAction = false; send('act', { type: o.toCall === 0 ? 'check' : 'fold' }); return; }
@@ -429,6 +484,7 @@ async function tableView(tableId) {
     else if (d.step) { const o = myOptions(); if (o) { raiseTo = Math.max(o.minTo, Math.min(o.maxTo, (raiseTo ?? o.minTo) + (+d.step) * S.config.bigBlind)); render(); } }
     else if (d.back !== undefined) { raiseOpen = false; render(); }
     else if (d.pre !== undefined) { preAction = !preAction; render(); }
+    else if (d.run) send('runout', { times: +d.run });
     else if (d.close !== undefined) { if (confirm('End the session? No more hands can be played at this table, all seeds are revealed, and a tournament table is saved to the tracker.')) send('close'); }
     else if (d.act === 'raise') { const o = myOptions(); raiseOpen = false; send('act', { type: 'raise', amount: o ? Math.max(o.minTo, Math.min(o.maxTo, raiseTo)) : raiseTo }); }
     else if (d.act === 'leave') { if (confirm('Leave the table? Your stack is kept if you come back this session.')) send('leave'); }
@@ -499,7 +555,7 @@ async function tableView(tableId) {
   const poll = setInterval(() => { if (!document.hidden) refresh().catch(() => {}); }, 2500); // safety net if live updates drop
   const onResize = () => render();
   window.addEventListener('resize', onResize);
-  cleanup = () => { dead = true; document.body.classList.remove('in-table'); window.removeEventListener('resize', onResize); document.removeEventListener('keydown', onKey); clearInterval(tick); clearInterval(poll); sb.removeChannel(channel); view.removeEventListener('click', onClick); view.removeEventListener('input', onInput); };
+  cleanup = () => { dead = true; runTimers.forEach(clearTimeout); document.body.classList.remove('in-table'); window.removeEventListener('resize', onResize); document.removeEventListener('keydown', onKey); clearInterval(tick); clearInterval(poll); sb.removeChannel(channel); view.removeEventListener('click', onClick); view.removeEventListener('input', onInput); };
   await refresh();
 }
 
@@ -590,6 +646,8 @@ async function handView(handId) {
   view.innerHTML = `
     <div class="card-box"><div class="row" style="justify-content:space-between"><h2>Hand #${h.hand_no}</h2><a href="#hands/${h.table_id}">← All hands</a></div>
       <div style="margin-bottom:10px">${cardsHtml(r.board) || '<span class="muted">No flop</span>'}</div>
+      ${r.board2 ? `<div style="margin-bottom:10px"><span class="note">Second board (run twice)</span><br>${cardsHtml(r.board2)}</div>` : ''}
+      ${r.runout ? `<div class="note" style="margin-bottom:10px">All-in ${['before the flop', '', '', 'on the flop', 'on the turn'][r.runout.from]}, run ${r.runout.times === 2 ? 'twice' : 'once'}. Chance to win at that point: ${Object.entries(r.runout.runs[0].stages[0].equity).map(([id, e]) => `${esc(prof(id).name)} ${Math.round(e * 100)}%`).join(' · ')}</div>` : ''}
       <div class="table-wrap"><table><thead><tr><th>Player</th><th>Cards</th><th>Hand</th><th class="num">Start</th><th class="num">Put in</th><th class="num">Won</th><th class="num">Result</th></tr></thead><tbody>
       ${r.players.map(p => {
         const shown = p.hole || (p.profileId === me ? cards[handId] : null);
@@ -627,7 +685,12 @@ async function statsView(tableId) {
   const hands = await q(query);
   const st = {};
   for (const h of hands) for (const p of h.record.players) {
-    const s = st[p.profileId] ||= { hands: 0, vpip: 0, pfr: 0, flop: 0, sd: 0, sdWon: 0, won: 0, net: 0, bb: 0, biggest: 0 };
+    const s = st[p.profileId] ||= { hands: 0, vpip: 0, pfr: 0, flop: 0, sd: 0, sdWon: 0, won: 0, net: 0, bb: 0, biggest: 0, allIns: 0, expected: 0, actual: 0 };
+    const eq0 = h.record.runout?.runs[0].stages[0].equity[p.profileId];
+    if (eq0 !== undefined) { // all-in with cards to come: compare the share of the pot they won with their chance at the time
+      const shared = h.record.players.filter(x => h.record.runout.runs[0].stages[0].equity[x.profileId] !== undefined).reduce((a, x) => a + x.won, 0);
+      s.allIns++; s.expected += eq0; s.actual += shared ? p.won / shared : 0;
+    }
     const contested = h.record.results.pots.some(pot => pot.contested && pot.winners.includes(p.profileId)) || (h.record.results.endedBy === 'fold' && p.won > 0);
     s.hands++; s.vpip += p.vpip; s.pfr += p.pfr; s.flop += p.sawFlop; s.sd += p.showdown; s.sdWon += p.showdown && p.won > 0 && contested;
     s.won += contested; s.net += p.net; s.bb += p.net / h.record.blinds[1]; s.biggest = Math.max(s.biggest, p.net);
@@ -635,15 +698,17 @@ async function statsView(tableId) {
   const pct = (a, b) => b ? Math.round(a / b * 100) + '%' : '–';
   const rows = Object.entries(st).sort((a, b) => b[1].net - a[1].net).map(([id, s]) => `<tr><td>${who(id)}</td><td class="num">${s.hands}</td>
     <td class="num">${pct(s.won, s.hands)}</td><td class="num">${pct(s.vpip, s.hands)}</td><td class="num">${pct(s.pfr, s.hands)}</td><td class="num">${pct(s.flop, s.hands)}</td>
-    <td class="num">${pct(s.sd, s.hands)}</td><td class="num">${pct(s.sdWon, s.sd)}</td><td class="num">${signed(s.biggest)}</td>
+    <td class="num">${pct(s.sd, s.hands)}</td><td class="num">${pct(s.sdWon, s.sd)}</td>
+    <td class="num">${s.allIns || '–'}</td><td class="num">${s.allIns ? pct(s.expected, s.allIns) : '–'}</td><td class="num">${s.allIns ? pct(s.actual, s.allIns) : '–'}</td>
+    <td class="num ${s.actual - s.expected > 0.05 ? 'pos' : s.actual - s.expected < -0.05 ? 'neg' : ''}">${s.allIns ? (s.actual - s.expected > 0 ? '+' : '') + (s.actual - s.expected).toFixed(1) : '–'}</td><td class="num">${signed(s.biggest)}</td>
     <td class="num">${(s.bb / s.hands * 100).toFixed(0)}</td><td class="num ${s.net > 0 ? 'pos' : s.net < 0 ? 'neg' : ''}"><b>${signed(s.net)}</b></td></tr>`);
   view.innerHTML = `<div class="card-box">
     <div class="row" style="justify-content:space-between"><h2>Player stats</h2>
       <select id="stats-table"><option value="">All tables</option>${tables.map(t => `<option value="${t.id}"${t.id === tableId ? ' selected' : ''}>${esc(t.name)} (${new Date(t.created_at).toLocaleDateString()})</option>`).join('')}</select></div>
     <div class="table-wrap"><table><thead><tr><th>Player</th><th class="num">Hands</th><th class="num">Hands won</th><th class="num" title="Voluntarily put chips in before the flop">Played</th>
-      <th class="num" title="Raised before the flop">Raised pre</th><th class="num">Saw flop</th><th class="num">Showdown</th><th class="num">Won at showdown</th><th class="num">Biggest win</th><th class="num" title="Big blinds won per 100 hands">BB/100</th><th class="num">Net chips</th></tr></thead>
-      <tbody>${rows.join('') || '<tr><td colspan="11" class="muted">No hands played yet.</td></tr>'}</tbody></table></div>
-    <p class="note">Played = hands where the player chose to put chips in before the flop. BB/100 = big blinds won per 100 hands, the usual way to compare results across different blind sizes.</p></div>
+      <th class="num" title="Raised before the flop">Raised pre</th><th class="num">Saw flop</th><th class="num">Showdown</th><th class="num">Won at showdown</th><th class="num" title="All-ins with cards still to come">All-ins</th><th class="num" title="Average chance to win when the money went in">Expected</th><th class="num" title="Share of those pots actually won">Actual</th><th class="num" title="Pots won above or below what the odds predicted">Luck</th><th class="num">Biggest win</th><th class="num" title="Big blinds won per 100 hands">BB/100</th><th class="num">Net chips</th></tr></thead>
+      <tbody>${rows.join('') || '<tr><td colspan="15" class="muted">No hands played yet.</td></tr>'}</tbody></table></div>
+    <p class="note">Played = hands where the player chose to put chips in before the flop. BB/100 = big blinds won per 100 hands, the usual way to compare results across different blind sizes. All-in columns count hands where everyone was all-in with cards still to come: Expected is the average chance to win when the money went in, Actual is the share of those pots really won, and Luck is the difference in pots (+1.0 = one whole pot more than the odds predicted).</p></div>
     ${tableId ? `<div class="card-box"><h2>Stacks over the session</h2>${stackChart(hands)}</div>` : ''}`;
   $('stats-table').addEventListener('change', e => { location.hash = '#stats' + (e.target.value ? '/' + e.target.value : ''); });
 }

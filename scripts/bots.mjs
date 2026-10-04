@@ -48,6 +48,9 @@ for (;;) {
         continue;
       }
       const h = S.hand, me = h.players.find(p => p.profileId === b.id);
+      if (h.awaiting && me && !me.folded && !h.awaiting.votes[b.id]) { // all-in: bots are happy to run it twice
+        await sleep(1500); S = await b.call('runout', { times: 2 }); console.log(`${b.first} chooses to run it twice`); break;
+      }
       if (!me || h.toAct !== me.seat) continue;
       const toCall = Math.min(h.currentBet - me.bet, me.stack), maxTo = me.bet + me.stack, minTo = Math.min(h.currentBet + h.minRaise, maxTo), r = Math.random();
       const others = h.players.some(o => o !== me && !o.folded && !o.allIn);

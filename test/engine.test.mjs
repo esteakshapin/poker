@@ -122,7 +122,7 @@ test('leaving mid-hand folds you and remembers your stack', () => {
 test('random play: chips are conserved and every hand finishes', () => {
   let seed = 12345;
   const rnd = n => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed % n; };
-  for (let game = 0; game < 300; game++) {
+  for (let game = 0; game < 40; game++) { // every all-in also computes odds, so keep this modest
     const n = 2 + rnd(5), t = table(Array.from({ length: n }, () => 20 + rnd(400)), { smallBlind: 1 + rnd(3), bigBlind: 4 + rnd(4) });
     const total = chips(t);
     for (let hand = 0; hand < 25 && E.playersReady(t) >= 2; hand++) {
@@ -132,6 +132,12 @@ test('random play: chips are conserved and every hand finishes', () => {
       let steps = 0;
       while (t.hand.street !== 'done') {
         assert.ok(++steps < 500, 'hand did not finish');
+        if (t.hand.awaiting) { // all-in: everyone picks once or twice
+          const twice = rnd(2) === 0;
+          for (const p of t.hand.players.filter(p => !p.folded)) if (t.hand.awaiting) E.voteRunout(t, p.profileId, twice ? 2 : 1);
+          if (twice) { assert.equal(t.hand.runout.times, 2); assert.equal(new Set([...t.hand.board, ...t.hand.board2.slice(t.hand.runout.from)]).size, 10 - t.hand.runout.from); }
+          continue;
+        }
         const pid = t.seats[t.hand.toAct].profileId, legal = E.legalActions(t, pid), r = rnd(10);
         if (legal.canRaise && r < 3) E.act(t, pid, { type: 'raise', amount: legal.minTo + rnd(legal.maxTo - legal.minTo + 1) });
         else if (legal.canCheck) E.act(t, pid, { type: 'check' });
@@ -142,8 +148,7 @@ test('random play: chips are conserved and every hand finishes', () => {
       }
       assert.equal(t.hand.players.reduce((a, p) => a + p.net, 0), 0);
       assert.equal(t.hand.results.pots.reduce((a, p) => a + p.amount, 0), t.hand.players.reduce((a, p) => a + p.total, 0));
-      const pub = JSON.stringify(E.publicView(t));
-      for (const p of t.hand.players) if (!t.hand.results.shown.includes(p.profileId)) assert.ok(!pub.includes(`"${p.hole[0]}","${p.hole[1]}"`), 'mucked cards leaked');
+      for (const p of E.publicView(t).hand.players) assert.equal(p.hole !== null, t.hand.results.shown.includes(p.profileId), 'only shown hands are public');
     }
   }
 });
@@ -154,4 +159,59 @@ test('public view never contains the deck or unshown hole cards mid-hand', () =>
   const pub = E.publicView(t);
   assert.equal(pub.hand.deck, undefined);
   assert.ok(pub.hand.players.every(p => p.hole === null));
+});
+
+test('all-in: cards go face up, players choose, run it twice splits the pot by board', () => {
+  const t = table([100, 100]);
+  // heads-up deal order: seat 1 (big blind) first, then seat 0 (button). p1 has aces, p0 has kings.
+  const used = ['As', 'Ad', 'Ks', 'Kd', '2c', '7d', '9h', '3s', '4c', 'Kh', '5d', '6c'];
+  const rest = FRESH_DECK.filter(c => !used.includes(c));
+  // hole cards, burn, flop, burn, turn, burn, river | second run: burn, turn, burn, river
+  const deck = ['As', 'Ks', 'Ad', 'Kd', rest[0], '2c', '7d', '9h', rest[1], '3s', rest[2], '4c', rest[3], 'Kh', rest[4], '5d', ...rest.slice(5), '6c'];
+  E.startHand(t, { id: 'h1', deck });
+  E.act(t, 'p0', { type: 'call' }); E.act(t, 'p1', { type: 'check' });          // see the flop: 2c 7d 9h
+  E.act(t, 'p1', { type: 'bet', amount: 98 }); E.act(t, 'p0', { type: 'call' }); // all-in on the flop
+  const h = t.hand;
+  assert.ok(h.awaiting && h.toAct === null && h.street === 'flop');
+  assert.equal(E.publicView(t).hand.players.filter(p => p.hole).length, 2);     // both hands face up
+  assert.ok(h.awaiting.equity.p1 > 0.85 && Math.abs(h.awaiting.equity.p0 + h.awaiting.equity.p1 - 1) < 1e-9);
+  E.voteRunout(t, 'p0', 2);
+  assert.ok(t.hand.awaiting);                                                    // needs both to agree
+  E.voteRunout(t, 'p1', 2);
+  assert.equal(h.street, 'done');
+  assert.deepEqual(h.board, ['2c', '7d', '9h', '3s', '4c']);                     // run 1: aces hold
+  assert.deepEqual(h.board2, ['2c', '7d', '9h', 'Kh', '5d']);                    // run 2: kings hit a set
+  assert.deepEqual(t.seats.filter(Boolean).map(s => s.stack), [100, 100]);       // one board each
+  assert.deepEqual(h.results.pots[0].runs.map(r => r.winners), [['p1'], ['p0']]);
+  const st = h.runout.runs[0].stages;
+  assert.deepEqual(st.map(x => x.len), [3, 4, 5]);
+  assert.deepEqual(st[0].outs.p0.sort(), ['Kc', 'Kh']);                          // kings need a king
+  assert.equal(st[2].equity.p1, 1);
+  assert.equal(h.runout.runs[1].stages.at(-1).equity.p0, 1);
+});
+
+test('one vote for "once" settles it; a timed-out choice also runs once', () => {
+  for (const viaTimeout of [false, true]) {
+    const t = table([60, 200]);
+    E.startHand(t, { id: 'h1', deck: FRESH_DECK });
+    E.act(t, 'p0', { type: 'raise', amount: 60 }); E.act(t, 'p1', { type: 'call' }); // preflop all-in
+    assert.equal(t.hand.awaiting.from, 0);
+    if (viaTimeout) E.autoAct(t); else { E.voteRunout(t, 'p1', 2); E.voteRunout(t, 'p0', 1); }
+    assert.equal(t.hand.street, 'done');
+    assert.equal(t.hand.runout.times, 1);
+    assert.equal(t.hand.board.length, 5); assert.equal(t.hand.board2, null);
+    assert.equal(chips(t), 260);
+  }
+});
+
+test('odds: known match-ups', () => {
+  const pre = E.equities([['As', 'Ah'], ['Ks', 'Kh']], []);                      // aces vs kings is about 82 / 18
+  assert.ok(pre[0] > 0.78 && pre[0] < 0.86, String(pre[0]));
+  const flop = E.equities([['As', 'Ah'], ['7s', '6s']], ['8s', '9d', '2s']);     // open-ended straight flush draw is a small favourite
+  assert.ok(flop[1] > 0.5 && flop[1] < 0.6, String(flop[1]));
+  const river = E.equities([['As', 'Ah'], ['Ks', 'Kh']], ['2c', '3d', '7h', '9s', 'Jc']);
+  assert.deepEqual(river, [1, 0]);
+  const turnOuts = E.outs([['As', 'Ah'], ['Ks', 'Qs']], ['2s', '7s', '9h', 'Jc']); // nine spades or a ten for the straight
+  assert.equal(turnOuts[0].length, 0);
+  assert.equal(turnOuts[1].length, 8 + 3);                                       // 8 spades left (the ace is in the other hand) + Td Th Tc
 });

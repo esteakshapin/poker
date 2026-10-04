@@ -33,6 +33,9 @@ async function whoIs(req: Request): Promise<Caller> {
   return { email, profileId: must(profile)?.id ?? null, isAdmin: !!must(admin) };
 }
 
+const RUNOUT_CHOICE_MS = 12000;  // time to choose once / twice
+const RUNOUT_STREET_MS = 4200;   // screen time per street of an all-in board (the table screen uses the same pacing)
+
 // ---------- seeds ----------
 async function freshCommitment() {
   const serverSeed = F.randomSeed(32);
@@ -78,14 +81,17 @@ async function afterMove(p: Priv): Promise<Step> {
   if (!hand) return {};
   if (hand.street !== 'done') {
     // The clock restarts only when the action actually moved on.
-    const turn = `${hand.id}:${hand.actions.length}`;
-    if (p.turn !== turn) { p.turn = turn; p.deadline = Date.now() + p.table.config.actionSeconds * 1000; }
+    // While players choose "run it once or twice" they get a short, fixed window.
+    const turn = `${hand.id}:${hand.actions.length}${hand.awaiting ? ':runout' : ''}`;
+    if (p.turn !== turn) { p.turn = turn; p.deadline = Date.now() + (hand.awaiting ? RUNOUT_CHOICE_MS : p.table.config.actionSeconds * 1000); }
     return {};
   }
   if (p.recorded === hand.id) return {};
   p.recorded = hand.id;
   p.deadline = null;
-  p.nextHandAt = Date.now() + (hand.results.endedBy === 'showdown' ? 9000 : 5000);
+  // Leave time for the all-in board to be shown street by street before the next hand.
+  const streets = hand.runout ? hand.runout.times * ({ 0: 3, 3: 2, 4: 1 } as Record<number, number>)[hand.runout.from] : 0;
+  p.nextHandAt = Date.now() + (hand.results.endedBy === 'showdown' ? 9000 : 5000) + streets * RUNOUT_STREET_MS;
   p.next = await freshCommitment();   // commit to the NEXT hand's seed now, before players send theirs
   p.seeds = {};
   p.current = { commitment: p.current.commitment };
@@ -218,11 +224,16 @@ const actions: Record<string, (b: Body, c: Caller) => Promise<unknown>> = {
 
   act: (b, c) => mutate(b.tableId, async p => { E.act(p.table, seated(c), { type: b.type, amount: b.amount }); return await afterMove(p); }),
 
+  // All-in with cards to come: each player still in picks once or twice.
+  runout: (b, c) => mutate(b.tableId, async p => { E.voteRunout(p.table, seated(c), Number(b.times)); return await afterMove(p); }),
+
   // Anyone at the table may call this once the clock has run out; the server checks the clock itself.
   timeout: (b, _c) => mutate(b.tableId, async p => {
     const hand = p.table.hand;
-    if (!hand || hand.street === 'done' || hand.toAct === null) return;
+    if (!hand || hand.street === 'done') return;
     if (!p.deadline || Date.now() < p.deadline) return;
+    if (hand.awaiting) { E.resolveRunout(p.table); return await afterMove(p); }  // nobody chose: run it once
+    if (hand.toAct === null) return;
     const seat = hand.toAct, before = hand.actions.length;
     E.autoAct(p.table);
     if (hand.actions[before]?.type === 'fold' && p.table.seats[seat]) p.table.seats[seat].sittingOut = true;

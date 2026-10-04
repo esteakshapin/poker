@@ -33,6 +33,7 @@ async function login(u) {
 const people = await Promise.all(users.map(login));
 const admin = people.find(p => p.admin), players = people.filter(p => !p.admin).slice(0, 4);
 const byId = Object.fromEntries(people.map(p => [p.id, p]));
+let allIns = 0, ranTwice = 0;
 let rnd = 42; const rand = n => { rnd = (rnd * 1103515245 + 12345) & 0x7fffffff; return rnd % n; };
 
 async function playSession({ tournamentId, revealMode, hands }) {
@@ -87,6 +88,14 @@ async function playSession({ tournamentId, revealMode, hands }) {
     let steps = 0;
     while (S.hand.street !== 'done') {
       assert.ok(++steps < 200);
+      if (S.hand.awaiting) { // all-in: hands are face up; everyone picks once or twice
+        assert.ok(S.hand.players.filter(p => !p.folded).every(p => p.hole), 'all-in hands are shown');
+        const twice = rand(2) === 0; allIns++;
+        for (const p of S.hand.players.filter(p => !p.folded)) if (S.hand.awaiting) S = (await byId[p.profileId].call('runout', { tableId, times: twice ? 2 : 1 })).state;
+        assert.equal(S.hand.street, 'done'); assert.equal(S.hand.runout.times, twice ? 2 : 1);
+        if (twice) ranTwice++;
+        continue;
+      }
       const h = S.hand, me = h.players.find(p => p.seat === h.toAct), who = byId[me.profileId];
       const toCall = Math.min(h.currentBet - me.bet, me.stack), maxTo = me.bet + me.stack, minTo = Math.min(h.currentBet + h.minRaise, maxTo);
       const others = h.players.some(o => o !== me && !o.folded && !o.allIn), r = rand(10);
@@ -113,8 +122,11 @@ async function playSession({ tournamentId, revealMode, hands }) {
     assert.equal(S.hand.actions.length, before, 'timeout is ignored before the clock runs out');
     await sleep(S.deadline - Date.now() + 300);
     S = (await players[0].call('timeout', { tableId })).state;
-    assert.ok(S.hand.actions.length > before && S.hand.actions[before].auto, 'server acts for the player after the clock runs out');
-    while (S.hand.street !== 'done') { const me = S.hand.players.find(p => p.seat === S.hand.toAct); S = (await byId[me.profileId].call('act', { tableId, type: S.hand.currentBet - me.bet > 0 ? 'fold' : 'check' })).state; }
+    assert.ok(S.hand.street === 'done' || (S.hand.actions.length > before && S.hand.actions[before].auto), 'server acts for the player after the clock runs out');
+    while (S.hand.street !== 'done') {
+      if (S.hand.awaiting) { S = (await players[0].call('runout', { tableId, times: 1 })).state; continue; }
+      const me = S.hand.players.find(p => p.seat === S.hand.toAct); S = (await byId[me.profileId].call('act', { tableId, type: S.hand.currentBet - me.bet > 0 ? 'fold' : 'check' })).state;
+    }
   }
 
   // close: seeds revealed, everything verifies
@@ -154,4 +166,4 @@ const ids = Object.keys(t.chips[no]);
 const expected = ids.reduce((a, id) => a + carried(id), 0) + t.buyIns.filter(b => b.session === no).reduce((a, b) => a + b.count * t.settings.chipsPerBuyIn, 0);
 assert.equal(ids.reduce((a, id) => a + t.chips[no][id], 0), expected, 'tracker chip check balances');
 console.log(' ', res, `→ saved as session ${no} of "${t.settings.name}"`);
-console.log('\nAll checks passed.');
+console.log(`\nAll checks passed. (${allIns} all-in runouts, ${ranTwice} run twice)`);

@@ -87,6 +87,14 @@ export function dealPlan(dealOrder) {
   const b = 2 * n;
   return { hole, board: [b + 1, b + 2, b + 3, b + 5, b + 7], burns: [b, b + 4, b + 6] };
 }
+// "Run it twice": the second board keeps the cards that were already out (`from` of them) and takes
+// its remaining cards from the deck right after the first board, with a burn before each street.
+export function secondBoardPlan(dealOrder, from) {
+  const first = dealPlan(dealOrder).board, idx = first.slice(0, from);
+  let pos = first[4] + 1;
+  while (idx.length < 5) { pos++; const count = idx.length === 0 ? 3 : 1; for (let k = 0; k < count; k++) idx.push(pos++); }
+  return idx;
+}
 
 // Re-checks a finished, revealed hand. Returns a list of {name, ok, detail} checks.
 // `seenCommitment` is the commitment this device saw before the hand started (optional but stronger).
@@ -110,5 +118,9 @@ export async function verifyHand(hand, seenCommitment) {
   }
   const board = rec.board || [];
   if (board.length) add('Board cards match the deck', board.every((c, i) => deck[plan.board[i]] === c), plan.board.slice(0, board.length).map(i => deck[i]).join(' '));
+  if (rec.board2) {
+    const idx = secondBoardPlan(rec.dealOrder || [], rec.runout?.from ?? 0);
+    add('Second board (run it twice) matches the deck', rec.board2.every((c, i) => deck[idx[i]] === c), idx.map(i => deck[i]).join(' '));
+  }
   return checks;
 }

@@ -68,3 +68,23 @@ test('shuffle is uniform: every card is equally likely in every position', async
   // 51 * 51 = 2601 degrees of freedom: mean 2601, sd ~72. Anything biased blows far past this.
   assert.ok(chi2 > 2250 && chi2 < 2950, `chi-square ${chi2.toFixed(0)} outside the expected range`);
 });
+
+test('run it twice: the second board is verified against the deck too', async () => {
+  const E = await import('../supabase/functions/_shared/engine.js');
+  for (const street of [0, 3, 4]) {
+    const server_seed = F.randomSeed(), client_seeds = { a: 'aaaaaaaa', b: 'bbbbbbbb' };
+    const deck = await F.shuffledDeck(server_seed, F.shuffleMessage({ tableId: 'tbl', handNo: 1, clientSeeds: client_seeds }));
+    const t = E.newTable(); E.sit(t, 'a', 0, { stack: 100, bought: 100 }); E.sit(t, 'b', 1, { stack: 100, bought: 100 });
+    E.startHand(t, { id: 'h', deck });
+    const act = type => { const pid = t.seats[t.hand.toAct].profileId, l = E.legalActions(t, pid); E.act(t, pid, type === 'shove' ? { type: 'raise', amount: l.maxTo } : { type: l.canCheck ? 'check' : 'call' }); };
+    while (t.hand.board.length < street) act('check');
+    act('shove'); act('call');
+    assert.equal(t.hand.awaiting.from, street);
+    E.voteRunout(t, 'a', 2); E.voteRunout(t, 'b', 2);
+    const hand = { table_id: 'tbl', hand_no: 1, client_seeds, commitment: await F.commitmentFor(server_seed), server_seed, deck, record: E.handRecord(t) };
+    const checks = await F.verifyHand(hand);
+    assert.ok(checks.some(c => /Second board/.test(c.name)) && checks.every(c => c.ok), JSON.stringify(checks.filter(c => !c.ok)));
+    const tampered = { ...hand, record: { ...hand.record, board2: [...hand.record.board2.slice(0, 4), hand.record.board[4]] } };
+    assert.ok((await F.verifyHand(tampered)).some(c => !c.ok));
+  }
+});

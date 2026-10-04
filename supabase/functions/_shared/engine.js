@@ -4,7 +4,7 @@
 // The deck is handed in already shuffled (see fair.js), so the same state + same deck
 // + same actions always produce the same result. Shared by the server and the tests.
 
-import { RANKS } from './fair.js';
+import { RANKS, FRESH_DECK } from './fair.js';
 
 export class RuleError extends Error {}
 const fail = msg => { throw new RuleError(msg); };
@@ -53,6 +53,47 @@ export function bestHand(cards) {
       if (!best || compareRanks(rank, best.rank) > 0) best = { rank, cards: five };
     }
   return { ...best, name: HAND_NAMES[best.rank[0]] };
+}
+
+// ---------- odds ----------
+// Each player's chance of having the best hand once the board is complete (ties count as a share).
+// holes: [[c, c], ...] for the players still in; board: cards already out; dead: other cards known to be gone.
+// Up to two cards to come it checks every possible board exactly. Before the flop there are 1.7 million
+// boards, so it samples 4,000 of them with a fixed pseudo-random sequence (same cards, same answer everywhere).
+export function equities(holes, board, dead = []) {
+  const known = new Set([...holes.flat(), ...board, ...dead]);
+  const rest = FRESH_DECK.filter(c => !known.has(c)), need = 5 - board.length, wins = holes.map(() => 0);
+  let total = 0;
+  const score = full => {
+    const ranks = holes.map(h => bestHand([...h, ...full]).rank);
+    const top = ranks.reduce((b, r) => compareRanks(r, b) > 0 ? r : b);
+    const tied = ranks.map(r => compareRanks(r, top) === 0), k = tied.filter(Boolean).length;
+    tied.forEach((t, i) => { if (t) wins[i] += 1 / k; });
+    total++;
+  };
+  if (need === 0) score(board);
+  else if (need === 1) for (const a of rest) score([...board, a]);
+  else if (need === 2) for (let i = 0; i < rest.length; i++) for (let j = i + 1; j < rest.length; j++) score([...board, rest[i], rest[j]]);
+  else {
+    let seed = [...known].join('').split('').reduce((a, ch) => (a * 31 + ch.charCodeAt(0)) >>> 0, 7);
+    const rnd = n => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return Math.floor(seed / 4294967296 * n); };
+    for (let s = 0; s < 4000; s++) {
+      const pick = [...rest];
+      for (let i = 0; i < need; i++) { const j = i + rnd(pick.length - i); [pick[i], pick[j]] = [pick[j], pick[i]]; }
+      score([...board, ...pick.slice(0, need)]);
+    }
+  }
+  return wins.map(w => w / total);
+}
+// For each player who is currently behind: the next cards that would put them in front (or level).
+export function outs(holes, board, dead = []) {
+  if (board.length < 3 || board.length > 4) return holes.map(() => []);
+  const known = new Set([...holes.flat(), ...board, ...dead]);
+  const rest = FRESH_DECK.filter(c => !known.has(c));
+  const ahead = cards => { const r = holes.map(h => bestHand([...h, ...cards]).rank); return r.map(x => r.every(y => compareRanks(x, y) >= 0)); };
+  const now = ahead(board), res = holes.map(() => []);
+  for (const c of rest) ahead([...board, c]).forEach((a, i) => { if (a && !now[i]) res[i].push(c); });
+  return res;
 }
 
 // ---------- table ----------
@@ -215,6 +256,7 @@ export function act(state, profileId, action) {
 // What the server does when a player runs out of time: check if free, otherwise fold.
 export function autoAct(state) {
   const h = liveHand(state);
+  if (h?.awaiting) return resolveRunout(state);
   if (!h || h.toAct === null) return false;
   const p = player(h, h.toAct), legal = legalActions(state, p.profileId);
   act(state, p.profileId, { type: legal.canCheck ? 'check' : 'fold', auto: true });
@@ -234,19 +276,68 @@ function settle(state) {
   while (h.street !== 'done') {
     const alive = h.players.filter(p => !p.folded);
     if (alive.length === 1) return finish(state, 'fold');
+    if (h.awaiting) break;
     if (!roundDone(h)) { if (h.toAct === null) h.toAct = nextToAct(state, h.button); break; }
     // Betting round over: next street.
     for (const p of h.players) { p.bet = 0; p.acted = false; p.canRaise = true; }
     h.currentBet = 0; h.minRaise = state.config.bigBlind;
     if (h.street === 'river') return finish(state, 'showdown');
+    if (alive.filter(canAct).length < 2) {
+      // Everyone is all-in (or one player has everyone covered): no more betting. Cards go face up
+      // and the players choose whether to run the rest of the board once or twice.
+      const eq = equities(alive.map(p => p.hole), h.board);
+      h.awaiting = { from: h.board.length, votes: {}, equity: Object.fromEntries(alive.map((p, i) => [p.profileId, eq[i]])) };
+      h.toAct = null;
+      break;
+    }
     h.deckPos++; // burn one
     const count = h.street === 'preflop' ? 3 : 1;
     h.board.push(...h.deck.slice(h.deckPos, h.deckPos + count)); h.deckPos += count;
     h.street = { preflop: 'flop', flop: 'turn', turn: 'river' }[h.street];
     if (h.street === 'flop') alive.forEach(p => { p.sawFlop = true; });
-    h.toAct = nextToAct(state, h.button); // null when everyone is all-in: loop deals the rest
+    h.toAct = nextToAct(state, h.button);
   }
   foldIfAbsent(state);
+}
+
+// A player's choice for an all-in runout. One "once" settles it; twice needs everyone still in to agree.
+export function voteRunout(state, profileId, times) {
+  const h = liveHand(state);
+  if (!h?.awaiting) fail('Nothing to choose right now.');
+  if (!h.players.some(p => p.profileId === profileId && !p.folded)) fail('You are not in this hand.');
+  h.awaiting.votes[profileId] = times === 2 ? 2 : 1;
+  const alive = h.players.filter(p => !p.folded);
+  if (times !== 2 || alive.every(p => h.awaiting.votes[p.profileId] === 2)) resolveRunout(state);
+}
+// Deal the rest of the board (once, or twice if everyone agreed) and finish the hand.
+// The second run continues from the next cards in the same deck: burn, cards, burn, cards...
+export function resolveRunout(state) {
+  const h = liveHand(state);
+  if (!h?.awaiting) return false;
+  const alive = h.players.filter(p => !p.folded), base = [...h.board], holes = alive.map(p => p.hole);
+  const times = alive.every(p => h.awaiting.votes[p.profileId] === 2) ? 2 : 1;
+  const boards = [];
+  for (let r = 0; r < times; r++) {
+    const b = [...base];
+    while (b.length < 5) { h.deckPos++; const count = b.length === 0 ? 3 : 1; b.push(...h.deck.slice(h.deckPos, h.deckPos + count)); h.deckPos += count; }
+    boards.push(b);
+  }
+  // Odds and outs at every step of each run, for display and for the hand record.
+  const ids = alive.map(p => p.profileId);
+  const runs = boards.map((full, r) => {
+    const dead = r ? boards[0].slice(base.length) : [], stages = [];
+    for (const len of [...new Set([base.length, 3, 4, 5])].filter(l => l >= base.length)) {
+      const board = full.slice(0, len), eq = equities(holes, board, dead), o = outs(holes, board, dead);
+      stages.push({ len, equity: Object.fromEntries(ids.map((id, i) => [id, eq[i]])), outs: Object.fromEntries(ids.map((id, i) => [id, o[i]]).filter(([, v]) => v.length)) });
+    }
+    return { board: full, stages };
+  });
+  h.runout = { times, from: base.length, votes: h.awaiting.votes, runs };
+  h.board = boards[0]; h.board2 = boards[1] || null;
+  h.awaiting = null;
+  alive.forEach(p => { p.sawFlop = true; });
+  finish(state, 'showdown');
+  return true;
 }
 
 // Split the money into main and side pots from what each player put in.
@@ -268,18 +359,24 @@ export function buildPots(players) {
 function finish(state, endedBy) {
   const h = state.hand, alive = h.players.filter(p => !p.folded);
   const showdown = endedBy === 'showdown';
-  if (showdown) alive.forEach(p => { p.showdown = true; p.best = bestHand([...p.hole, ...h.board]); });
+  const boards = showdown ? [h.board, h.board2].filter(Boolean) : [];
+  if (showdown) alive.forEach(p => { p.showdown = true; p.bests = boards.map(b => bestHand([...p.hole, ...b])); p.best = p.bests[0]; });
   const payout = new Map(h.players.map(p => [p, 0]));
   const pots = buildPots(h.players).map(pot => {
-    let winners = pot.eligible;
-    if (showdown && winners.length > 1) {
-      const top = winners.reduce((b, p) => compareRanks(p.best.rank, b.best.rank) > 0 ? p : b);
-      winners = winners.filter(p => compareRanks(p.best.rank, top.best.rank) === 0);
-    }
-    // Odd chips go one at a time to winners in deal order (closest to the left of the button first).
-    const share = Math.floor(pot.amount / winners.length); let odd = pot.amount - share * winners.length;
-    for (const p of h.players) if (winners.includes(p)) payout.set(p, payout.get(p) + share + (odd-- > 0 ? 1 : 0));
-    return { amount: pot.amount, winners: winners.map(p => p.profileId), contested: pot.eligible.length > 1 };
+    // Run twice: each board plays for half of the pot (the first board gets the odd chip).
+    const halves = boards.length === 2 ? [Math.ceil(pot.amount / 2), Math.floor(pot.amount / 2)] : [pot.amount];
+    const runs = halves.map((amount, r) => {
+      let winners = pot.eligible;
+      if (showdown && winners.length > 1) {
+        const top = winners.reduce((b, p) => compareRanks(p.bests[r].rank, b.bests[r].rank) > 0 ? p : b);
+        winners = winners.filter(p => compareRanks(p.bests[r].rank, top.bests[r].rank) === 0);
+      }
+      // Odd chips go one at a time to winners in deal order (closest to the left of the button first).
+      const share = Math.floor(amount / winners.length); let odd = amount - share * winners.length;
+      for (const p of h.players) if (winners.includes(p)) payout.set(p, payout.get(p) + share + (odd-- > 0 ? 1 : 0));
+      return { amount, winners: winners.map(p => p.profileId) };
+    });
+    return { amount: pot.amount, winners: [...new Set(runs.flatMap(r => r.winners))], contested: pot.eligible.length > 1, ...(runs.length > 1 ? { runs } : {}) };
   });
   for (const p of h.players) {
     p.stack += payout.get(p); p.won = payout.get(p); p.net = p.stack - p.startStack;
@@ -295,16 +392,20 @@ function finish(state, endedBy) {
 // What everyone may see. Hole cards appear only for players who reached showdown.
 export function publicView(state) {
   const h = state.hand;
+  // Cards are face up at showdown, and as soon as an all-in leaves nothing more to bet.
+  const shown = !h ? [] : h.awaiting ? h.players.filter(p => !p.folded).map(p => p.profileId) : h.results?.shown || [];
   return {
     config: state.config, handNo: state.handNo, button: state.button,
     seats: state.seats.map(s => s && { profileId: s.profileId, stack: s.stack, sittingOut: s.sittingOut, bought: s.bought, carried: s.carried }),
     hand: h && {
-      id: h.id, no: h.no, street: h.street, board: h.board, button: h.button, sb: h.sb, bb: h.bb,
+      id: h.id, no: h.no, street: h.street, board: h.board, board2: h.board2 || null, button: h.button, sb: h.sb, bb: h.bb,
+      awaiting: h.awaiting || null, runout: h.runout || null,
       pot: h.players.reduce((a, p) => a + p.total, 0), currentBet: h.currentBet, minRaise: h.minRaise, toAct: h.toAct,
       players: h.players.map(p => ({
         seat: p.seat, profileId: p.profileId, stack: p.stack, bet: p.bet, total: p.total, folded: p.folded, allIn: p.allIn,
-        hole: h.results?.shown.includes(p.profileId) ? p.hole : null,
-        handName: h.results?.shown.includes(p.profileId) ? p.best?.name : null, won: p.won, net: p.net
+        hole: shown.includes(p.profileId) ? p.hole : null,
+        handName: h.results?.shown.includes(p.profileId) ? p.best?.name : null,
+        handName2: h.board2 && h.results?.shown.includes(p.profileId) ? p.bests[1].name : null, won: p.won, net: p.net
       })),
       actions: h.actions, results: h.results
     }
@@ -318,6 +419,7 @@ export function handRecord(state) {
   return {
     no: h.no, button: h.button, sb: h.sb, bb: h.bb, blinds: [state.config.smallBlind, state.config.bigBlind],
     dealOrder: h.players.map(p => p.profileId), board: h.board, actions: h.actions, results: h.results,
+    ...(h.runout ? { board2: h.board2, runout: h.runout } : {}),
     players: h.players.map(p => ({
       profileId: p.profileId, seat: p.seat, startStack: p.startStack, endStack: p.stack, net: p.net, won: p.won, put: p.total,
       hole: shown.includes(p.profileId) ? p.hole : null, handName: shown.includes(p.profileId) ? p.best.name : null,
