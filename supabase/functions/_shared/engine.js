@@ -388,6 +388,13 @@ function finish(state, endedBy) {
   state.seats.forEach((s, i) => { if (s?.leaving) { state.away[s.profileId] = { ...s, leaving: false }; state.seats[i] = null; } });
 }
 
+// After a hand is over a player may turn over one or both of their hole cards for the table.
+export function showCards(state, profileId, cards) {
+  const h = state.hand, p = h?.players.find(x => x.profileId === profileId);
+  if (!h || h.street !== 'done' || !p) fail('You can show your cards once the hand is over.');
+  p.show = [0, 1].map(i => !!p.show?.[i] || cards.includes(i));
+}
+
 // ---------- views ----------
 // What everyone may see. Hole cards appear only for players who reached showdown.
 export function publicView(state) {
@@ -403,7 +410,7 @@ export function publicView(state) {
       pot: h.players.reduce((a, p) => a + p.total, 0), currentBet: h.currentBet, minRaise: h.minRaise, toAct: h.toAct,
       players: h.players.map(p => ({
         seat: p.seat, profileId: p.profileId, stack: p.stack, bet: p.bet, total: p.total, folded: p.folded, allIn: p.allIn,
-        hole: shown.includes(p.profileId) ? p.hole : null,
+        hole: shown.includes(p.profileId) ? p.hole : p.show ? p.hole.map((c, i) => p.show[i] ? c : null) : null,
         handName: h.results?.shown.includes(p.profileId) ? p.best?.name : null,
         handName2: h.board2 && h.results?.shown.includes(p.profileId) ? p.bests[1].name : null, won: p.won, net: p.net
       })),

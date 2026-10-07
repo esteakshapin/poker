@@ -227,6 +227,12 @@ const actions: Record<string, (b: Body, c: Caller) => Promise<unknown>> = {
   // All-in with cards to come: each player still in picks once or twice.
   runout: (b, c) => mutate(b.tableId, async p => { E.voteRunout(p.table, seated(c), Number(b.times)); return await afterMove(p); }),
 
+  // Hand over: turn over one or both of your own cards. The next hand waits a moment so people can look.
+  show: (b, c) => mutate(b.tableId, p => {
+    E.showCards(p.table, seated(c), (Array.isArray(b.cards) ? b.cards : []).map(Number));
+    if (p.nextHandAt) p.nextHandAt = Math.max(p.nextHandAt, Date.now() + 3000);
+  }),
+
   // Anyone at the table may call this once the clock has run out; the server checks the clock itself.
   timeout: (b, _c) => mutate(b.tableId, async p => {
     const hand = p.table.hand;

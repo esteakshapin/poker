@@ -35,6 +35,44 @@ function cardHtml(c, cls = '') {
 }
 const cardsHtml = (cs, cls) => (cs || []).map(c => cardHtml(c, cls)).join('');
 
+// ---------- sound ----------
+// Every effect is synthesised in the browser, so there are no audio files to load.
+const Sound = (() => {
+  let ctx = null, hiss = null, muted = false;
+  try { muted = localStorage.getItem('poker-muted') === '1'; } catch (e) {}
+  // Browsers only allow sound after the first tap or key press.
+  const wake = () => { try { ctx ||= new (window.AudioContext || window.webkitAudioContext)(); if (ctx.state === 'suspended') ctx.resume(); } catch (e) {} };
+  ['pointerdown', 'keydown', 'touchend'].forEach(ev => window.addEventListener(ev, wake, { passive: true }));
+  const env = (t, dur, vol) => { const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + 0.006); g.gain.exponentialRampToValueAtTime(0.0001, t + dur); g.connect(ctx.destination); return g; };
+  function tone(t, freq, dur, vol = 0.2, type = 'sine', slideTo = 0) {
+    const o = ctx.createOscillator(); o.type = type; o.frequency.setValueAtTime(freq, t);
+    if (slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, t + dur);
+    o.connect(env(t, dur, vol)); o.start(t); o.stop(t + dur + 0.02);
+  }
+  function noise(t, dur, freq, vol = 0.3, kind = 'bandpass', q = 1) {
+    if (!hiss) { hiss = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate); const d = hiss.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1; }
+    const src = ctx.createBufferSource(), f = ctx.createBiquadFilter(); src.buffer = hiss; f.type = kind; f.frequency.value = freq; f.Q.value = q;
+    src.connect(f); f.connect(env(t, dur, vol)); src.start(t, Math.random() * 0.5, dur + 0.02);
+  }
+  const chip = (t, vol = 0.16) => { tone(t, 2300 + Math.random() * 500, 0.05, vol, 'triangle'); noise(t, 0.03, 5200, vol, 'bandpass', 3); };
+  const kit = {
+    card: t => { noise(t, 0.09, 2600, 0.3, 'highpass'); noise(t + 0.01, 0.05, 900, 0.14); },
+    chips: t => { chip(t); chip(t + 0.06); chip(t + 0.13, 0.11); },
+    allin: t => { for (let i = 0; i < 7; i++) chip(t + i * 0.05, 0.17); tone(t, 110, 0.5, 0.22, 'sawtooth', 55); },
+    check: t => { tone(t, 190, 0.07, 0.4, 'sine', 90); tone(t + 0.13, 190, 0.07, 0.4, 'sine', 90); },
+    fold: t => noise(t, 0.2, 1400, 0.16, 'lowpass'),
+    turn: t => { tone(t, 660, 0.16, 0.22, 'triangle'); tone(t + 0.14, 880, 0.16, 0.22, 'triangle'); tone(t + 0.28, 1320, 0.32, 0.2, 'triangle'); },
+    tick: t => { tone(t, 1000, 0.06, 0.2, 'square'); tone(t + 0.22, 1000, 0.06, 0.2, 'square'); },
+    win: t => { [523, 659, 784, 1047].forEach((f, i) => tone(t + i * 0.1, f, 0.3, 0.2, 'triangle')); for (let i = 0; i < 6; i++) chip(t + 0.45 + i * 0.06, 0.11); },
+    pot: t => { for (let i = 0; i < 6; i++) chip(t + i * 0.06, 0.12); }
+  };
+  return {
+    play(name, delayMs = 0) { if (muted || !ctx || ctx.state !== 'running') return; try { kit[name](ctx.currentTime + 0.01 + delayMs / 1000); } catch (e) {} },
+    get muted() { return muted; },
+    toggle() { muted = !muted; try { localStorage.setItem('poker-muted', muted ? '1' : '0'); } catch (e) {} wake(); return muted; }
+  };
+})();
+
 // ---------- server calls ----------
 async function call(action, body = {}) {
   const res = await fetch(`${CFG.url}/functions/v1/game`, {
@@ -137,6 +175,7 @@ async function tableView(tableId) {
       <div class="tv-title"><b>${esc(info.name)} · ${info.tournament_id ? 'tournament' : 'practice'}</b><span>NLH ~ ${info.config.smallBlind} / ${info.config.bigBlind}</span></div>
       <span id="seat-btns" class="row" style="gap:6px;flex-wrap:nowrap"></span>
       <span id="admin-btns"></span>
+      <button class="ghost" id="tv-sound" title="Sound on / off">${Sound.muted ? '🔇' : '🔊'}</button>
       <button class="ghost" id="tv-info" title="Hand log, fairness and stacks">☰</button>
       <button class="ghost" id="tv-full" title="Full screen">⛶</button>
     </div>
@@ -195,6 +234,10 @@ async function tableView(tableId) {
     if (elapsed > b.delay + dur) return '';
     return `animation:${name} ${Math.round(dur)}ms ${real ? 'ease-in-out' : 'cubic-bezier(.25,.8,.3,1)'} ${Math.round(b.delay - elapsed)}ms both;`;
   }
+  // Sounds use the same idea: each has a key and plays once, the first time it is asked for.
+  const heard = new Set();
+  function sfx(key, name, delay = 0) { if (heard.has(key)) return; heard.add(key); if (!firstPaint) Sound.play(name, delay); }
+  const pageTitle = document.title;
   const remaining = (key, dur) => { const b = born.get(key); return b ? Math.max(0, b.t + b.delay + dur * SPEED - performance.now()) / SPEED : 0; };
 
   // ----- chips -----
@@ -263,8 +306,10 @@ async function tableView(tableId) {
     const h = S.hand, isLive = live(), stage = $('felt'), hid = h?.id;
     if (hid !== bornHand) { born.clear(); bornHand = hid; }
     const portrait = stage.clientHeight > stage.clientWidth * 1.05;
-    const RX = portrait ? 34 : 40, RY = portrait ? 40 : 36, CY = portrait ? 48 : 47;
-    const at = (i, r = 1) => { const a = Math.PI / 2 + ((i - rot + n) % n) * 2 * Math.PI / n; return [50 + Math.cos(a) * RX * r, CY + Math.sin(a) * RY * r]; };
+    // Seats sit on a ring just outside the felt, so name plates never cover the board or the pot.
+    // On a phone the side seats are pushed all the way to the screen edges.
+    const RX = portrait ? 50 : 44, RY = portrait ? 41 : 40, CY = portrait ? 49 : 48;
+    const at = (i, r = 1) => { const a = Math.PI / 2 + ((i - rot + n) % n) * 2 * Math.PI / n, x = 50 + Math.cos(a) * RX * r; return [portrait ? Math.max(15, Math.min(85, x)) : x, CY + Math.sin(a) * RY * r]; };
     const place = ([x, y]) => `left:${x.toFixed(1)}%;top:${y.toFixed(1)}%;`;
     const seatAt = ([x, y]) => `--x:${x.toFixed(1)}%;top:${y.toFixed(1)}%;`;
     const from = ([x, y], [fx, fy]) => `--dx:${(fx - x).toFixed(1)}cqw;--dy:${(fy - y).toFixed(1)}cqh;`; // offset to where it starts
@@ -287,6 +332,18 @@ async function tableView(tableId) {
     const winners = h?.results && !revealing ? new Map() : null;
     if (winners) for (const pot of h.results.pots) for (const w of pot.winners) winners.set(w, (winners.get(w) || 0) + Math.floor(pot.amount / pot.winners.length));
 
+    // sounds for whatever just happened
+    if (h) {
+      sfx(`deal:${hid}`, 'card'); for (let c = 1; c < nP * 2; c++) sfx(`deal:${hid}:${c}`, 'card', c * 130 * SPEED);
+      if (lastAct) sfx(`act:${hid}:${h.actions.length}`, lastAct.allIn ? 'allin' : { fold: 'fold', check: 'check' }[lastAct.type] || 'chips');
+      if (winners?.size) sfx(`win:${hid}`, winners.get(me) > 0 ? 'win' : 'pot', 700);
+    }
+    const myTurn = !!myOptions() && !preAction;
+    if (myTurn && !heard.has(`turn:${hid}:${h.actions.length}`)) { try { if (!firstPaint) navigator.vibrate?.([120, 60, 120]); } catch (e) {} }
+    if (myTurn) sfx(`turn:${hid}:${h.actions.length}`, 'turn', 250);
+    view.firstElementChild.classList.toggle('myturn', myTurn);
+    document.title = myTurn ? '▶ YOUR TURN' : pageTitle;
+
     let html = `<div class="felt ${portrait ? 'portrait' : ''}"></div>`;
     S.seats.forEach((s, i) => {
       const xy = at(i);
@@ -301,14 +358,14 @@ async function tableView(tableId) {
         const fromMid = `--dx:calc(${(50 - xy[0]).toFixed(1)}cqw - ${DECK_X}*var(--bfs));--dy:${(boardY - xy[1]).toFixed(1)}cqh;`; // from the deck
         const deal = c => anim(`deal:${hid}:${i}:${c}`, 'deal', 450, (c * nP + k) * 130) + fromMid;
         const dealEnd = remaining(`deal:${hid}:${i}:1`, 450);
-        const faces = pl.hole || (isMe ? mine.cards : null);
-        if (pl.folded && !(isMe && faces)) {
+        const faces = (isMe ? mine.cards : null) || pl.hole; // pl.hole may hold just one card if they chose to show one
+        if (pl.folded && !faces) {
           const m = anim(`muck:${hid}:${i}`, 'muck', 500);
           if (m) cards = [0, 1].map(() => `<span class="hc" style="${m}${fromMid}">${cardHtml(null)}</span>`).join('');
         } else if (faces) {
           const flip = anim(`face:${hid}:${i}`, 'flipin', 400, born.has(`face:${hid}:${i}`) ? 0 : dealEnd);
-          cards = faces.map((c, j) => `<span class="hc">${flipCard(c, deal(j), flip, pl.folded ? 'dim' : '')}</span>`).join('');
-          if (!pl.folded) tag = winners ? [pl.handName, pl.handName2].filter(Boolean).join(' / ') || strength(faces, boardNow) : strength(faces, boardNow);
+          cards = faces.map((c, j) => `<span class="hc">${flipCard(c, deal(j), flip, pl.folded && !pl.hole?.[j] ? 'dim' : '')}</span>`).join('');
+          if (!pl.folded && faces.every(Boolean)) tag = winners ? [pl.handName, pl.handName2].filter(Boolean).join(' / ') || strength(faces, boardNow) : strength(faces, boardNow);
         } else cards = [0, 1].map(j => `<span class="hc" style="${deal(j)}">${cardHtml(null)}</span>`).join('');
       }
       const stack = pl ? pl.stack - (revealing ? pl.won : 0) : s.stack; // winnings arrive when the board is finished
@@ -363,6 +420,7 @@ async function tableView(tableId) {
     const cardAt = (ri, col, rowY) => {
       const c = rowCards[ri]?.[col]; if (!c) return '';
       const key = `board:${hid}:${ri}:${col}`, flop = col < 3, street = flop ? 0 : col - 2;
+      sfx(key, 'card', T.go + (flop ? col * T.gap : 0));
       if (!flop || col === 0) { // one burn per street
         const bk = `burn:${hid}:${ri}:${street}`, fresh = !born.has(bk), ba = anim(bk, 'burn', T.burn, 0, true);
         if (ba) burns.push(`<span class="burncard" style="--by:${-(CH + GAP)}em;${ba}">${cardHtml(null)}</span>`); else burnt++;
@@ -401,7 +459,18 @@ async function tableView(tableId) {
     return { toCall, maxTo, minTo: Math.min(h.currentBet + h.minRaise, maxTo), canRaise: maxTo > h.currentBet && others, isBet: h.currentBet === 0, pot: h.pot, currentBet: h.currentBet };
   }
 
+  // Controls, plus (once the hand is over) a card bottom right to show your hand to the table.
   function renderControls(seatIdx, isLive) {
+    actionControls(seatIdx, isLive);
+    const h = S.hand, pl = h && hp(me);
+    if (S.status !== 'open' || !pl || !mine.cards || h.street !== 'done' || h.results.shown.includes(me) || (h.runout && !runoutView(h).done)) return;
+    const up = j => !!pl.hole?.[j], label = c => `${c[0] === 'T' ? '10' : c[0]}${SUIT[c[1]]}`;
+    $('controls').insertAdjacentHTML('afterbegin', `<div class="showbox">
+      <button class="${up(0) && up(1) ? 'on' : ''}" data-show="0,1">${up(0) && up(1) ? 'CARDS SHOWN' : 'SHOW ALL CARDS'}</button>
+      <div>${mine.cards.map((c, j) => `<button class="${up(j) ? 'on' : ''} ${'dh'.includes(c[1]) ? 'red' : ''}" data-show="${j}">${label(c)}</button>`).join('')}</div></div>`);
+  }
+
+  function actionControls(seatIdx, isLive) {
     const el = $('controls'), h = S.hand, seat = seatIdx >= 0 ? S.seats[seatIdx] : null, pl = h && hp(me);
     $('seat-btns').innerHTML = seat && S.status === 'open' ? (seat.sittingOut ? `<button class="ghost on" data-out="0">I'm back</button>` : `<button class="ghost" data-out="1">Away</button>`) + `<button class="ghost" data-act="leave">Leave</button>` : '';
     if (S.status === 'closed') { el.innerHTML = `<a href="#hands/${tableId}">Review and verify the hands from this session</a>`; return; }
@@ -492,6 +561,7 @@ async function tableView(tableId) {
   const onClick = e => {
     const btn = e.target.closest('button'); if (!btn) return;
     if (btn.id === 'tv-info' || btn.id === 'drawer-close') { $('drawer').classList.toggle('hidden'); if (btn.id === 'tv-info') loadChart(); return; }
+    if (btn.id === 'tv-sound') { btn.textContent = Sound.toggle() ? '🔇' : '🔊'; return; }
     if (btn.id === 'tv-full') { document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen().catch(() => {}); return; }
     const d = btn.dataset;
     if (d.sit !== undefined) send('sit', { seat: +d.sit });
@@ -502,6 +572,7 @@ async function tableView(tableId) {
     else if (d.back !== undefined) { raiseOpen = false; render(); }
     else if (d.pre !== undefined) { preAction = !preAction; render(); }
     else if (d.run) send('runout', { times: +d.run });
+    else if (d.show) { if (!btn.classList.contains('on')) send('show', { cards: d.show.split(',').map(Number) }); }
     else if (d.close !== undefined) { if (confirm('End the session? No more hands can be played at this table, all seeds are revealed, and a tournament table is saved to the tracker.')) send('close'); }
     else if (d.act === 'raise') { const o = myOptions(); raiseOpen = false; send('act', { type: 'raise', amount: o ? Math.max(o.minTo, Math.min(o.maxTo, raiseTo)) : raiseTo }); }
     else if (d.act === 'leave') { if (confirm('Leave the table? Your stack is kept if you come back this session.')) send('leave'); }
@@ -538,6 +609,7 @@ async function tableView(tableId) {
     const now = Date.now(), seatIdx = mySeat(), isLive = live();
     const t = view.querySelector('[data-timer]');
     if (t && S.deadline) t.style.transform = `scaleX(${Math.max(0, Math.min(1, (S.deadline - now) / (S.config.actionSeconds * 1000)))})`;
+    if (S.deadline && isLive && S.hand.toAct === seatIdx && S.deadline - now < 8000 && S.deadline > now) sfx(`warn:${S.deadline}`, 'tick');
     if (seatIdx < 0 || busy || S.status !== 'open') return;
     const order = S.seats.map((s, i) => s && !s.sittingOut ? i : -1).filter(i => i >= 0).indexOf(seatIdx); // spreads out who calls first
     const lag = Math.max(0, order) * 900;
@@ -572,7 +644,7 @@ async function tableView(tableId) {
   const poll = setInterval(() => { if (!document.hidden) refresh().catch(() => {}); }, 2500); // safety net if live updates drop
   const onResize = () => render();
   window.addEventListener('resize', onResize);
-  cleanup = () => { dead = true; runTimers.forEach(clearTimeout); document.body.classList.remove('in-table'); window.removeEventListener('resize', onResize); document.removeEventListener('keydown', onKey); clearInterval(tick); clearInterval(poll); sb.removeChannel(channel); view.removeEventListener('click', onClick); view.removeEventListener('input', onInput); };
+  cleanup = () => { dead = true; document.title = pageTitle; runTimers.forEach(clearTimeout); document.body.classList.remove('in-table'); window.removeEventListener('resize', onResize); document.removeEventListener('keydown', onKey); clearInterval(tick); clearInterval(poll); sb.removeChannel(channel); view.removeEventListener('click', onClick); view.removeEventListener('input', onInput); };
   await refresh();
 }
 
