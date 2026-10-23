@@ -616,7 +616,20 @@ function renderPerformance() {
   series.forEach((se, pi) => {
     const c = stats[pi].color, name = esc(stats[pi].name);
     if (!se.pts.length) return;
-    svg += `<path d="${se.pts.map((pt, i) => (i ? 'L' : 'M') + x(pt.pos) + ',' + y(pt[key])).join('')}" fill="none" stroke="${c}" stroke-width="2"/>`;
+    // Missed sessions: hold flat (dashed) until the start of the session they come back in.
+    let solid = '', dashed = '';
+    se.pts.forEach((pt, i) => {
+      const prev = se.pts[i - 1];
+      if (!prev) { solid += `M${x(pt.pos)},${y(pt[key])}`; return; }
+      if (pt.pos - prev.pos > 1) {
+        const hold = `${x(pt.pos - 1)},${y(prev[key])}`;
+        dashed += `M${x(prev.pos)},${y(prev[key])}L${hold}`;
+        solid += `M${hold}`;
+      }
+      solid += `L${x(pt.pos)},${y(pt[key])}`;
+    });
+    if (dashed) svg += `<path d="${dashed}" fill="none" stroke="${c}" stroke-width="2" stroke-dasharray="5 5" opacity="0.7"/>`;
+    svg += `<path d="${solid}" fill="none" stroke="${c}" stroke-width="2"/>`;
     se.pts.forEach(pt => {
       const tip = pt.start
         ? `${name} joined in S${pt.s} · bought in ${num(pt.bought)} chips (${money(pt.bought * S.buyIn / S.chipsPerBuyIn)})`
@@ -640,8 +653,8 @@ function renderPerformance() {
   $('chart').innerHTML = stats.length ? svg : '<div class="empty">No data yet.</div>';
   $('legend').innerHTML = stats.map(p => `<span class="who" data-profile="${p.id}"><i style="background:${p.color}"></i>${avatar(p, 20)}<span class="nm">${esc(p.name)}</span></span>`).join('');
   $('chart-note').textContent = key === 'net'
-    ? 'Each line starts at 0 (hollow dot) when the player first sits down, so a player who joins in S3 starts at the beginning of S3. Points show overall profit or loss at the end of each session, with all buy-ins and rebuys subtracted. Hover a dot for details.'
-    : 'Each line starts (hollow dot) at the chips the player bought in with when they first sat down, then shows their stack at the end of each session they played. Rebuys add to the stack. Hover a dot for details.';
+    ? 'Each line starts at 0 (hollow dot) when the player first sits down, so a player who joins in S3 starts at the beginning of S3. Points show overall profit or loss at the end of each session, with all buy-ins and rebuys subtracted. A dashed flat line means they sat that session out. Hover a dot for details.'
+    : 'Each line starts (hollow dot) at the chips the player bought in with when they first sat down, then shows their stack at the end of each session they played. Rebuys add to the stack. A dashed flat line means they sat that session out. Hover a dot for details.';
 
   $('session-results').innerHTML = stats.length ? `<thead><tr><th>Player</th>${sess.map(s => `<th class="num">S${s}</th>`).join('')}<th class="num">Total</th></tr></thead><tbody>` +
     stats.map((p, i) => {
